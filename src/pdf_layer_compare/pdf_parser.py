@@ -10,11 +10,11 @@ from pypdf.generic import DictionaryObject, IndirectObject, StreamObject
 from .annotation_analyzer import analyze_annotations
 from .base_analyzer import analyze_page, validate_resource
 from .model import Snapshot, Unsupported
-from .normalize import Canonicalizer, check_numeric_precision, dictionary, stream_data
+from .normalize import Canonicalizer, array, check_numeric_precision, dictionary, stream_data
 from .ocg_analyzer import OCGAnalyzer
 
 MAX_FILE = 128 * 1024 * 1024
-CATALOG_KEYS = {"/Type", "/Pages", "/OCProperties", "/Metadata", "/Version", "/Lang", "/PageLayout", "/PageMode", "/ViewerPreferences", "/MarkInfo"}
+CATALOG_KEYS = {"/Type", "/Pages", "/OCProperties", "/Metadata", "/Version", "/Lang", "/PageLayout", "/PageMode", "/ViewerPreferences", "/MarkInfo", "/AcroForm"}
 
 
 @contextmanager
@@ -78,7 +78,17 @@ def analyze_document(snapshot, reader):
             if not 1 <= len(reader.pages) <= 2000:
                 raise Unsupported("ページ数が対応範囲外 (1～2000)")
             ocg = snapshot.ocg
-            attrs = DictionaryObject({k: v for k, v in root.items() if k not in {"/Pages", "/OCProperties", "/Metadata"}})
+            if "/AcroForm" in root:
+                form = dictionary(root["/AcroForm"], "AcroForm")
+                if set(form) - {"/Fields", "/DR"} or array(form.get("/Fields"), "AcroForm Fields"):
+                    raise Unsupported("非空の AcroForm または未対応のフォーム属性")
+                if "/DR" in form:
+                    dictionary(form["/DR"], "AcroForm DR")
+                validate_resource(form, reader, ocg)
+                Canonicalizer(ocg).value(form)
+            # An empty Fields tree has no base-page widget. Its DR supplies
+            # annotation fonts and is compared with annotations instead.
+            attrs = DictionaryObject({k: v for k, v in root.items() if k not in {"/Pages", "/OCProperties", "/Metadata", "/AcroForm"}})
             validate_resource(attrs, reader, ocg)
             snapshot.base = [Canonicalizer(ocg).value(attrs)]
             snapshot.layers = {n: {"state": (ocg.configuration, ocg.attributes[n]), "drawings": [], "annotations": []} for n in ocg.names}

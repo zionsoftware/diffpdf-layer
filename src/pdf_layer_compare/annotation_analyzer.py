@@ -71,6 +71,7 @@ def analyze_annotations(page, reader, ocg, page_number):
         # AP exists. Retain the complete resource graph conservatively here.
         resources = page.get("/Resources", DictionaryObject())
         resources = Canonicalizer(ocg).value(resources)
-        layers[owner].append((page_number, Canonicalizer(ocg).value(data), ap, resources))
+        defaults = Canonicalizer(ocg).value(reader.root_object.get("/AcroForm", DictionaryObject()))
+        layers[owner].append((page_number, Canonicalizer(ocg).value(data), ap, resources, defaults))
         order.append(owner)
     return layers, order

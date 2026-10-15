@@ -148,7 +148,7 @@ def test_bdc_outside_q(make_pdf):
     "q /OC /L0 BDC 10 20 30 40 re EMC S Q",
     "10 20 m q /OC /L0 BDC 20 20 l S EMC Q",
     "q unknownoperator Q", "q 1 w", "EMC", "BT BT ET ET", "q 10 20 re S Q",
-    "q /Span << /ActualText (x) >> BDC BT /F1 12 Tf (X) Tj ET EMC Q",
+    "q /Span 42 BDC BT /F1 12 Tf (X) Tj ET EMC Q",
 ])
 def test_unsafe_content_unknown(make_pdf, content):
     a = make_pdf(content=content)

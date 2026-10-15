@@ -43,8 +43,8 @@ def test_malformed_ocg_config(make_pdf, kwargs):
     assert not report.results
 
 
-def test_usage_is_explicitly_unknown(make_pdf):
-    a = make_pdf(mutate=lambda w, g: g[0].get_object().update(pdf_value({"/Usage": {"/View": {"/ViewState": "/ON"}}})))
+def test_conditional_usage_is_explicitly_unknown(make_pdf):
+    a = make_pdf(mutate=lambda w, g: g[0].get_object().update(pdf_value({"/Usage": {"/Language": {"/Lang": "ja-JP"}}})))
     assert compare_files([a, a]).status == Status.UNKNOWN
 
 

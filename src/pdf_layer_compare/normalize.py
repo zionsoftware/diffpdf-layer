@@ -84,6 +84,9 @@ class Canonicalizer:
     def __init__(self, ocg=None):
         self.ocg = ocg
         self.nodes = 0
+        # Keep strong references: temporary PDF dictionaries must not alias a
+        # recycled id. Only complete, successfully traversed values are cached.
+        self.cache = {}
 
     def value(self, obj, active=frozenset(), depth=0):
         self.nodes += 1
@@ -114,6 +117,8 @@ class Canonicalizer:
             return ("bytes", bytes(obj).hex())
         if id(obj) in active:
             raise Unsupported("循環するオブジェクト参照")
+        if isinstance(obj, DictionaryObject) and id(obj) in self.cache:
+            return self.cache[id(obj)][1]
         active = active | {id(obj)}
         sub = lambda x: self.value(x, active, depth + 1)
         if isinstance(obj, (ArrayObject, list, tuple)):
@@ -133,7 +138,9 @@ class Canonicalizer:
                 if not opaque:
                     skip |= {"/Filter", "/DecodeParms"}
             items = tuple((str(k), sub(v)) for k, v in sorted(obj.items()) if k not in skip)
-            return ("stream", items, sha256(data).hexdigest()) if data is not None else items
+            result = ("stream", items, sha256(data).hexdigest()) if data is not None else items
+            self.cache[id(obj)] = (obj, result)
+            return result
         raise Unsupported(f"未対応オブジェクト型: {type(obj).__name__}")
 
 

@@ -36,6 +36,11 @@ def validate_resource(obj, reader, ocg, active=frozenset(), depth=0):
     if isinstance(obj, (DictionaryObject, ArrayObject)):
         if id(obj) in active:
             raise Unsupported("循環するリソース")
+        cache = getattr(reader, "_layer_compare_validated_resources", None)
+        if cache is None:
+            cache = reader._layer_compare_validated_resources = {}
+        if id(obj) in cache:
+            return
         active = active | {id(obj)}
     if isinstance(obj, DictionaryObject):
         if "/OC" in obj or obj.get("/Type") in {"/OCG", "/OCMD"}:
@@ -58,6 +63,8 @@ def validate_resource(obj, reader, ocg, active=frozenset(), depth=0):
     elif isinstance(obj, ArrayObject):
         for value in obj:
             validate_resource(value, reader, ocg, active, depth + 1)
+    if isinstance(obj, (DictionaryObject, ArrayObject)):
+        cache[id(obj)] = obj
 
 
 class DrawingAnalyzer:
@@ -173,19 +180,26 @@ class DrawingAnalyzer:
                     if not isinstance(args[0], NameObject) or (op == "BMC" and args[0] == "/OC"):
                         raise Unsupported("marked content のタグまたは OC 属性が不正")
                     owner = stack[-1] if stack else None
+                    marked_value = self.normal.value(args)
                     if op == "BDC":
-                        if str(args[0]) != "/OC":
-                            raise Unsupported("OC 以外の BDC 属性 (ActualText 等) は未対応")
                         prop = args[1]
                         if isinstance(prop, NameObject):
                             prop = self.resource(resources, "/Properties", prop)
-                        new_owner = self.ocg.owner(prop)
-                        if owner and owner != new_owner:
-                            raise Unsupported("異なる OCG の入れ子")
-                        owner = new_owner
-                        owners.add(owner)
+                        if str(args[0]) == "/OC":
+                            new_owner = self.ocg.owner(prop)
+                            if owner and owner != new_owner:
+                                raise Unsupported("異なる OCG の入れ子")
+                            owner = new_owner
+                            owners.add(owner)
+                            marked_value = owner
+                        else:
+                            prop = dictionary(prop, "marked-content 属性")
+                            validate_resource(prop, self.reader, self.ocg)
+                            # Preserve semantic text and artifact attributes;
+                            # neither changes the enclosing OCG membership.
+                            marked_value = (str(args[0]), self.normal.value(prop))
                     stack.append(owner)
-                    normalized.append((op, owner if op == "BDC" else self.normal.value(args)))
+                    normalized.append((op, marked_value))
                     continue
                 if op == "EMC":
                     if not stack:
@@ -225,7 +239,7 @@ class DrawingAnalyzer:
         return tuple(base), layers, composition
 
 
-PAGE_KEYS = {"/Type", "/Parent", "/Resources", "/Contents", "/Annots", "/MediaBox", "/CropBox", "/BleedBox", "/TrimBox", "/ArtBox", "/Rotate", "/UserUnit", "/Group", "/Metadata", "/StructParents", "/Tabs"}
+PAGE_KEYS = {"/Type", "/Parent", "/Resources", "/Contents", "/Annots", "/MediaBox", "/CropBox", "/BleedBox", "/TrimBox", "/ArtBox", "/Rotate", "/UserUnit", "/Group", "/Metadata", "/StructParents", "/Tabs", "/Trans"}
 
 
 def analyze_page(page, reader, ocg):
@@ -239,6 +253,13 @@ def analyze_page(page, reader, ocg):
     else:
         base, layers, composition = (), {n: [] for n in ocg.names}, []
     attrs = DictionaryObject({k: v for k, v in page.items() if k not in {"/Parent", "/Resources", "/Contents", "/Annots", "/Metadata", "/StructParents"}})
+    if "/Trans" in attrs:
+        transition = dictionary(attrs["/Trans"], "ページ Trans")
+        # An empty transition dictionary means the default replacement (no
+        # animation). Editors may remove it when resaving. Preserve all actual
+        # transition parameters so presentation behaviour changes are detected.
+        if not transition:
+            del attrs[NameObject("/Trans")]
     # Default colour spaces apply even without explicit CS/cs operands.
     colors = dictionary(resources.get("/ColorSpace", DictionaryObject()))
     defaults = DictionaryObject({k: v for k, v in colors.items() if k in {"/DefaultGray", "/DefaultRGB", "/DefaultCMYK"}})

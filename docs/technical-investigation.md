@@ -35,4 +35,6 @@ pypdf の FloatObject は内部で float を使い、その repr は PDF 出力�
 
 ## 実出力が必要な項目
 
-PDF-XChange Editor の FreeText の DA/AP とフォント、注釈の Popup / IRT、Form のネスト、Usage / AS、保存最適化、増分保存を優先する。現段階では未入手の実出力に対応できたと主張しない。
+2026-10-16 に PDF-XChange Editor 11.1 の実出力から FreeText の DA/AP と日本語フォント、空の AcroForm、限定した Usage / AS、Artifact 属性を確認して対応した。評価版の Link 注釈を含む未加工出力は検証不能となる。検証条件は [実機検証記録](xchange-validation.md) を参照。
+
+引き続き、ライセンス適用済み環境の出力、注釈の Popup / IRT、Form のネスト、言語・ズーム等の条件付き Usage / AS、保存最適化、増分保存を優先する。未確認の構造まで対応できたとは主張しない。

@@ -8,7 +8,8 @@
 | 空の OCG 集合 | 全入力が空なら本文のみ比較可能 |
 | D / Configs、BaseState ON/OFF、ON/OFF、Order、Locked、RBGroups、Intent | 構成検査と値の比較。既定値を明示/省略した差は不一致になる場合あり |
 | レイヤーの表示状態 | 設定辞書とグループ属性を比較。全設定を各レイヤーに含めるため、1 状態の変更が全レイヤーに不一致として現れることあり |
-| Usage、AS、BaseState Unchanged | 検証不能。自動状態や曖昧な初期状態は解釈しない |
+| Usage の View / Print / Export State、AS の View / Print / Export | 限定対応。ON/OFF 値、Event / Category / 登録 OCG を検査し、設定をそのまま比較。現在の表示だけで所属を決めない |
+| Usage の言語・ズーム等、上記以外の AS、BaseState Unchanged | 検証不能 |
 | OCMD、VE、異なる OCG の入れ子 | 検証不能 |
 | 注釈 OC | 単一の登録済み OCG のみ対応 |
 | Text / FreeText / Line / Square / Circle / Polygon / PolyLine / Highlight / Underline / Squiggly / StrikeOut / Caret / Stamp / Ink / Redact / Watermark | 辞書属性を比較。必須座標の一部も検査。完全な subtype 別妥当性検証ではない |
@@ -20,6 +21,7 @@
 | Popup / Parent / IRT、注釈アクション、Widget / Link / 添付 / マルチメディア等 | 検証不能。関連オブジェクトを省略して一致にしない |
 | レイヤー未所属注釈 | 異常として検証不能 |
 | ページ数 / MediaBox 他 box / Rotate / UserUnit / Group | 対応。属性値を比較 |
+| ページ Trans | 空辞書は既定の無効果状態として省略と同一視。それ以外は属性を保持して比較 |
 | 通常の本文テキスト・パス・色・描画状態・フォント / 画像 / ExtGState / 色空間 / Shading | 命令と使用リソースの構造比較。画素比較ではない |
 | OCG marked content | `q ... /OC ... BDC ... EMC ... Q` または `/OC ... BDC q ... Q EMC` の安全に分離できる単一所属区間 |
 | 本文と OCG が同一区間に混在、未保存の描画状態、開いたパス/テキスト | 検証不能 |
@@ -30,8 +32,10 @@
 | DCT / JPX | 符号化データとパラメーターを保持して比較。画素として再展開しない |
 | JBIG2 / CCITT / Crypt / その他フィルター | 検証不能。追加バイナリを呼び出さない |
 | パターン / Type3 / PostScript / 外部参照 | 検証不能 |
-| inline image / 非 OC の BDC 属性 / marked-content point / 互換性セクション / 未知の演算子 | 検証不能 |
-| StructTreeRoot / AcroForm / XFA / OpenAction / Names / 未知の Catalog・ページ属性 | 検証不能 |
+| 非 OC の BDC 属性 (Artifact / ActualText 等) | 辞書または Properties 参照を検査して値ごと比較。囲んでいる OCG 所属を維持 |
+| inline image / marked-content point / 互換性セクション / 未知の演算子 | 検証不能 |
+| AcroForm の Fields が空、任意の DR のみ | 注釈用フォント等のリソースを検査し、各所属注釈の比較へ含める。本文から分離 |
+| StructTreeRoot / 非空・上記以外の AcroForm / XFA / OpenAction / Names / 未知の Catalog・ページ属性 | 検証不能 |
 | 暗号化・破損 PDF・pypdf の解析警告 | 検証不能。暗号化は空パスワードでも拒否 |
 | Metadata / Info / ファイル ID、オブジェクト番号、辞書キー順 | 表示比較から除外または正規化 |
 | 未使用ページリソース | 本文は比較しない。注釈は DA 等の漏れを避けるためページリソース全体を含める |
