@@ -9,22 +9,29 @@ from .model import Report, Result, Status
 
 
 def to_json(report):
-    return json.dumps(asdict(report), ensure_ascii=False, indent=2)
+    data = asdict(report)
+    data.update(schema_version=2, reference=report.files[0] if report.files else None, targets=report.files[1:])
+    return json.dumps(data, ensure_ascii=False, indent=2)
 
 
 def from_json(text):
     data = json.loads(text)
+    if data.pop("schema_version", None) != 2:
+        raise ValueError("未対応の比較レポート形式です")
+    reference = data.pop("reference")
+    targets = data.pop("targets")
+    if reference != (data["files"][0] if data["files"] else None) or targets != data["files"][1:]:
+        raise ValueError("基準PDFと入力順の情報が一致しません")
     data["results"] = [Result(**{**r, "status": Status(r["status"])}) for r in data["results"]]
     return Report(**data)
 
 
 def to_text(report):
-    lines = ["PDFレイヤー同一性検証結果", f"総合: {report.status}", "一致は対応範囲内の構造比較の結果です。利用時の最終判断は利用者が行ってください。", "入力順:"]
-    lines += [f"{i}. {p}" for i, p in enumerate(report.files, 1)]
-    lines += [f"構成検査: {'正常' if report.configuration_ok else 'エラー (内容比較なし)'}"]
+    lines = ["PDFグループ別比較結果", "一致は対応範囲内の構造比較です。フォントのみ変更した一致は字幅・見た目の完全一致を保証しません。", "入力順:"]
+    lines += [f"{i}. {'基準PDF' if i == 1 else '比較対象'}: {p}" for i, p in enumerate(report.files, 1)]
     lines += report.errors
     for row in report.results:
-        lines += ["", f"{row.left} ↔ {row.right}", f"{row.component}: {row.status}", row.detail]
+        lines += ["", f"基準: {row.left}\n比較: {row.right}", f"{row.component}: {row.status}", row.detail]
     return "\n".join(lines) + "\n"
 
 
@@ -36,10 +43,9 @@ def csv_cell(value):
 def to_csv(report):
     stream = io.StringIO(newline="")
     writer = csv.writer(stream)
-    writer.writerow(["左ファイル", "右ファイル", "対象", "判定", "詳細"])
-    writer.writerow(["", "", "総合", report.status, "対応範囲内の構造比較"])
+    writer.writerow(["基準PDF", "比較対象PDF", "対象", "判定", "詳細"])
     for error in report.errors:
-        writer.writerow(["", "", "構成検査", Status.UNKNOWN, csv_cell(error)])
+        writer.writerow(["", "", "ファイル解析", Status.UNKNOWN, csv_cell(error)])
     for row in report.results:
         writer.writerow([csv_cell(v) for v in (row.left, row.right, row.component, row.status, row.detail)])
     return stream.getvalue()

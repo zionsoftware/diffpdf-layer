@@ -1,7 +1,6 @@
-from itertools import combinations
 from pathlib import Path
 
-from .model import Report, Result, Status
+from .model import BODY, COMPOSITION, UNLAYERED, Report, Result, Status, layer_key
 from .pdf_parser import analyze_document, open_document
 
 
@@ -32,29 +31,56 @@ def compare_files(paths):
         report.errors.append("PDF は 2～4 ファイル指定してください")
         return report
     opened = [open_document(p) for p in paths]
-    for snapshot, _ in opened:
-        if snapshot.configuration_error:
-            report.errors.append(f"{snapshot.path}: 構成検査エラー: {snapshot.configuration_error}")
-    if report.errors:
-        return report
-    all_names = set().union(*(s.names for s, _ in opened))
-    for snapshot, _ in opened:
-        missing = all_names - set(snapshot.names)
-        if missing:
-            report.errors.append(f"{snapshot.path}: 不足レイヤー: {', '.join(sorted(missing))}")
-    if report.errors:
-        return report
-    report.configuration_ok = True
-    snapshots = [analyze_document(s, reader) for s, reader in opened]
-    for a, b in combinations(snapshots, 2):
-        parts = [("ベースPDF", a.base, b.base), ("合成順序", a.composition, b.composition)]
-        parts += [(f"レイヤー: {n}", a.layers.get(n), b.layers.get(n)) for n in sorted(all_names)]
-        for component, left, right in parts:
-            if a.errors or b.errors:
-                detail = "\n".join(f"{s.path}: {e}" for s in (a, b) for e in s.errors)
-                status = Status.UNKNOWN
+    snapshots = [analyze_document(s, reader) if reader is not None else s for s, reader in opened]
+    for s in snapshots:
+        if s.file_error:
+            report.errors.append(f"{s.path}: ファイル解析エラー: {s.file_error}")
+    all_names = sorted(set().union(*(s.names for s in snapshots)))
+    a = snapshots[0]
+    for b in snapshots[1:]:
+        for component in [BODY, UNLAYERED, *(layer_key(n) for n in all_names), COMPOSITION]:
+            left, right = a.groups.get(component), b.groups.get(component)
+            is_layer = component.startswith("レイヤー: ")
+            unknown_registry = any(s.ocg and not s.ocg.registry_complete for s in (a, b))
+            if is_layer and left is None and right is None and not (a.file_error or b.file_error or unknown_registry):
+                continue
+            errors = [f"{s.path}: {s.file_error}" for s in (a, b) if s.file_error]
+            for snapshot, group in ((a, left), (b, right)):
+                if group:
+                    errors.extend(f"{snapshot.path}: {e}" for e in group.errors)
+                elif is_layer and snapshot.ocg and snapshot.ocg.global_errors:
+                    errors.extend(f"{snapshot.path}: {e}" for e in snapshot.ocg.global_errors)
+            row = Result(a.path, b.path, component, Status.UNKNOWN)
+            if errors:
+                row.detail = "\n".join(dict.fromkeys(errors))
+            elif is_layer and left is None:
+                row.status, row.detail = Status.ADDED, "基準PDFには存在しないレイヤーです。"
+            elif is_layer and right is None:
+                row.status, row.detail = Status.REMOVED, "比較対象PDFには存在しないレイヤーです。"
+            elif left is None or right is None:
+                row.detail = "グループ構造を取得できません。"
             else:
-                status = Status.MATCH if left == right else Status.DIFFERENT
-                detail = first_difference(left, right, component)
-            report.results.append(Result(a.path, b.path, component, status, detail))
+                lval, rval = left.content(), right.content()
+                if lval.exact == rval.exact:
+                    row.status = Status.MATCH
+                elif lval.font_errors or rval.font_errors:
+                    row.detail = "フォント差と文字内容の差を安全に分離できません。\n" + "\n".join(dict.fromkeys((*lval.font_errors, *rval.font_errors)))
+                elif lval.semantic == rval.semantic and set(lval.fonts) != set(rval.fonts):
+                    row.status = Status.FONT_ONLY
+                    before, after = set(lval.fonts), set(rval.fonts)
+                    removed, added = before - after, after - before
+                    row.font_changes = [{"before": sorted({name for name, _ in removed}), "after": sorted({name for name, _ in added}),
+                                         "source": "PDF内部名/CSSの申告名",
+                                         "before_fingerprints": sorted(digest for _, digest in removed),
+                                         "after_fingerprints": sorted(digest for _, digest in added)}]
+                    names_before = ", ".join(row.font_changes[0]["before"]) or "不明"
+                    names_after = ", ".join(row.font_changes[0]["after"]) or "不明"
+                    change = f"{names_before} → {names_after}" if names_before != names_after else f"フォント辞書・埋め込みデータ・文字マッピング等の差異 (内部名: {names_before})"
+                    row.detail = f"フォントのみ変更: {change}。PDF内部名等であり、正式名称の保証はありません。文字内容と明示した配置等の構造比較です。字幅や見た目の完全一致は保証しません。"
+                else:
+                    row.status = Status.DIFFERENT
+                    row.detail = first_difference(lval.semantic, rval.semantic, component)
+                    if not row.detail:
+                        row.detail = first_difference(lval.exact, rval.exact, component)
+            report.results.append(row)
     return report

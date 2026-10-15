@@ -10,6 +10,11 @@ from pypdf.generic import (
 )
 
 
+def statuses(report):
+    """Test helper only: production reports have no overall judgment."""
+    return {row.status for row in report.results}
+
+
 @pytest.fixture(scope="session")
 def runtime_app(tmp_path_factory):
     root = Path(__file__).resolve().parents[1]

@@ -29,7 +29,9 @@ class Application:
         root.protocol("WM_DELETE_WINDOW", self.close)
         frame = ttk.Frame(root, padding=12)
         frame.pack(fill="both", expand=True)
-        ttk.Label(frame, text="PDF を 2～4 個、工程順に指定してください。原本は読み取り専用で扱います。").pack(anchor="w")
+        ttk.Label(frame, text="PDF を 2～4 個指定してください。1番目が基準PDFです。上へ・下へで基準と入力順を変更できます。").pack(anchor="w")
+        self.reference_label = ttk.Label(frame, text="基準PDF: 未選択", wraplength=1020)
+        self.reference_label.pack(anchor="w")
         self.file_list = tk.Listbox(frame, height=5, selectmode="extended", exportselection=False)
         self.file_list.pack(fill="x", pady=(8, 4))
         buttons = ttk.Frame(frame)
@@ -53,14 +55,14 @@ class Application:
         pane.pack(fill="both", expand=True)
         result_frame = ttk.Frame(pane)
         self.tree = ttk.Treeview(result_frame, columns=("left", "right", "part", "status"), show="headings", selectmode="browse")
-        for key, label, width in (("left", "左ファイル", 255), ("right", "右ファイル", 255), ("part", "対象", 290), ("status", "判定", 110)):
+        for key, label, width in (("left", "基準PDF", 230), ("right", "比較対象PDF", 230), ("part", "対象", 230), ("status", "判定", 250)):
             self.tree.heading(key, text=label)
             self.tree.column(key, width=width, minwidth=80)
         scrollbar = ttk.Scrollbar(result_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
         self.tree.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
-        for tag, color in ((Status.MATCH, "#205c30"), (Status.DIFFERENT, "#9c2b20"), (Status.UNKNOWN, "#805600")):
+        for tag, color in ((Status.MATCH, "#205c30"), (Status.FONT_ONLY, "#205c30"), (Status.DIFFERENT, "#9c2b20"), (Status.ADDED, "#205880"), (Status.REMOVED, "#9c2b20"), (Status.UNKNOWN, "#805600")):
             self.tree.tag_configure(tag, foreground=color)
         self.tree.bind("<<TreeviewSelect>>", self.show_detail)
         pane.add(result_frame, weight=3)
@@ -72,7 +74,7 @@ class Application:
         self.detail.pack(side="left", fill="both", expand=True)
         detail_scroll.pack(side="right", fill="y")
         pane.add(detail_frame, weight=2)
-        ttk.Label(frame, text="一致は対応範囲内の構造比較です。未対応構造は検証不能です。PDF-XChange 実出力との互換性は追加検証が必要です。", wraplength=1020).pack(anchor="w", pady=(8, 0))
+        ttk.Label(frame, text="グループごとに独立して比較します。フォントのみ変更した一致は字幅や見た目の完全一致を保証しません。原本は変更しません。", wraplength=1020).pack(anchor="w", pady=(8, 0))
         self.add_files(files)
         root.after(100, self.poll)
 
@@ -92,7 +94,8 @@ class Application:
     def refresh_files(self):
         self.file_list.delete(0, "end")
         for i, path in enumerate(self.files, 1):
-            self.file_list.insert("end", f"{i}. {path}")
+            self.file_list.insert("end", f"{i}. {'[基準PDF]' if i == 1 else '[比較対象]'} {path}")
+        self.reference_label.configure(text=f"基準PDF: {self.files[0] if self.files else '未選択'}")
         self.invalidate()
 
     def add_files(self, files):
@@ -156,7 +159,8 @@ class Application:
             return
         self.process = process
         self.busy(True)
-        self.status.set(f"比較中: {len(self.files)} ファイル / 全組み合わせ (上限 {TIMEOUT} 秒)")
+        self.status.set(f"比較中: 基準PDF 対 {len(self.files)-1} ファイル (上限 {TIMEOUT} 秒)")
+        messages = self.messages  # the worker must never retain Tk objects
 
         def work():
             try:
@@ -164,12 +168,12 @@ class Application:
                 if process.returncode not in (0, 1, 2):
                     raise RuntimeError(f"比較プロセス異常終了 ({process.returncode})\n{stderr[-4000:]}")
                 report = from_json(stdout)
-                self.messages.put((generation, report, ""))
+                messages.put((generation, report, ""))
             except Exception as exc:
                 if process.poll() is None:
                     process.kill()
                 process.communicate()
-                self.messages.put((generation, None, f"検証不能: {type(exc).__name__}: {exc}"))
+                messages.put((generation, None, f"検証不能: {type(exc).__name__}: {exc}"))
         threading.Thread(target=work, daemon=True).start()
 
     def poll(self):
@@ -193,7 +197,7 @@ class Application:
 
     def render_report(self, report):
         self.report = report
-        self.status.set(f"総合: {report.status} / 結果 {len(report.results)} 行 / 構成エラー {len(report.errors)} 件")
+        self.status.set(f"比較完了 / グループ別結果 {len(report.results)} 行 / ファイル解析エラー {len(report.errors)} 件")
         for index, row in enumerate(report.results):
             left = f"{report.files.index(row.left) + 1}. {Path(row.left).name}"
             right = f"{report.files.index(row.right) + 1}. {Path(row.right).name}"
@@ -206,7 +210,7 @@ class Application:
         if not selected or not self.report:
             return
         row = self.report.results[int(selected[0])]
-        self.set_detail(f"左: {row.left}\n右: {row.right}\n対象: {row.component}\n判定: {row.status}\n\n{row.detail or '対応範囲内で同一です。'}")
+        self.set_detail(f"基準: {row.left}\n比較: {row.right}\n対象: {row.component}\n判定: {row.status}\n\n{row.detail or '対応範囲内で同一です。'}")
 
     def cancel(self):
         if self.process:

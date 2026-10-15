@@ -1,3 +1,4 @@
+from conftest import statuses
 import pytest
 from pypdf.generic import ArrayObject, FloatObject, IndirectObject, NameObject
 
@@ -15,7 +16,7 @@ def test_float_normalization_preserves_precision():
 def test_content_small_coordinate_change(make_pdf):
     a = make_pdf(content="q 0.1234567890123 0 m 20 20 l S Q")
     b = make_pdf(content="q 0.1234567890124 0 m 20 20 l S Q")
-    assert result(compare_files([a, b]), "ベースPDF").status == Status.DIFFERENT
+    assert result(compare_files([a, b]), "レイヤーなし").status == Status.DIFFERENT
 
 
 @pytest.mark.parametrize("content", [
@@ -27,7 +28,7 @@ def test_content_small_coordinate_change(make_pdf):
 ])
 def test_unsupported_or_malformed_ops(make_pdf, content):
     a = make_pdf(content=content)
-    assert compare_files([a, a]).status == Status.UNKNOWN
+    assert Status.UNKNOWN in statuses(compare_files([a, a]))
 
 
 @pytest.mark.parametrize("kwargs", [
@@ -39,20 +40,20 @@ def test_unsupported_or_malformed_ops(make_pdf, content):
 def test_malformed_ocg_config(make_pdf, kwargs):
     a = make_pdf(mutate=lambda w, g: w.root_object["/OCProperties"]["/D"].update(pdf_value(kwargs)))
     report = compare_files([a, a])
-    assert report.errors
-    assert not report.results
+    assert result(report, "PDF本体").status == Status.MATCH
+    assert result(report, "レイヤー: 担当者").status == Status.UNKNOWN
 
 
 def test_conditional_usage_is_explicitly_unknown(make_pdf):
     a = make_pdf(mutate=lambda w, g: g[0].get_object().update(pdf_value({"/Usage": {"/Language": {"/Lang": "ja-JP"}}})))
-    assert compare_files([a, a]).status == Status.UNKNOWN
+    assert Status.UNKNOWN in statuses(compare_files([a, a]))
 
 
 def test_on_off_conflict(make_pdf):
     def mutate(w, groups):
         w.root_object["/OCProperties"]["/D"].update(pdf_value({"/ON": [groups[0]], "/OFF": [groups[0]]}))
     a = make_pdf(mutate=mutate)
-    assert compare_files([a, a]).errors
+    assert result(compare_files([a, a]), "レイヤー: 担当者").status == Status.UNKNOWN
 
 
 def test_form_cycle(make_pdf):
@@ -63,8 +64,8 @@ def test_form_cycle(make_pdf):
         w.pages[0]["/Resources"][NameObject("/XObject")] = pdf_value({"/Fm": ref})
     a = make_pdf(content="q /Fm Do Q", mutate=mutate)
     report = compare_files([a, a])
-    assert report.status == Status.UNKNOWN
-    assert "循環" in report.results[0].detail
+    assert Status.UNKNOWN in statuses(report)
+    assert "循環" in result(report, "レイヤーなし").detail
 
 
 def test_generic_resource_cycle(make_pdf):
@@ -74,7 +75,7 @@ def test_generic_resource_cycle(make_pdf):
         resource[NameObject("/Cycle")] = ref
         w.pages[0]["/Resources"][NameObject("/ExtGState")] = pdf_value({"/GS": ref})
     a = make_pdf(content="q /GS gs 10 20 30 40 re S Q", mutate=mutate, annotations=[])
-    assert compare_files([a, a]).status == Status.UNKNOWN
+    assert Status.UNKNOWN in statuses(compare_files([a, a]))
 
 
 def test_appearance_cycle(make_pdf):
@@ -84,7 +85,7 @@ def test_appearance_cycle(make_pdf):
         ap[NameObject("/N")] = ref
         w.pages[0]["/Annots"][0].get_object()[NameObject("/AP")] = ref
     a = make_pdf(mutate=mutate)
-    assert compare_files([a, a]).status == Status.UNKNOWN
+    assert Status.UNKNOWN in statuses(compare_files([a, a]))
 
 
 def test_encryption(make_pdf):
@@ -100,33 +101,34 @@ def test_image_bytes_change(make_pdf):
         return mutate
     a = make_pdf(content="q /Im Do Q", mutate=image(b"\xff\x00\x00"))
     b = make_pdf(content="q /Im Do Q", mutate=image(b"\x00\xff\x00"))
-    assert result(compare_files([a, b]), "ベースPDF").status == Status.DIFFERENT
+    assert result(compare_files([a, b]), "レイヤーなし").status == Status.DIFFERENT
 
 
 def test_font_resource_changes(make_pdf):
     def mutate(w, groups):
         w.pages[0]["/Resources"]["/Font"]["/F1"].update(pdf_value({"/BaseFont": "/Courier"}))
-    assert result(compare_files([make_pdf(), make_pdf(mutate=mutate)]), "ベースPDF").status == Status.DIFFERENT
+    assert result(compare_files([make_pdf(), make_pdf(mutate=mutate)]), "レイヤーなし").status == Status.FONT_ONLY
 
 
 def test_unused_page_font_for_default_appearance(make_pdf):
     def mutate(w, groups):
         w.pages[0]["/Resources"]["/Font"]["/F1"].update(pdf_value({"/BaseFont": "/Courier"}))
-    a = make_pdf(content="", annotations=[{"/DA": "/F1 10 Tf"}])
-    b = make_pdf(content="", annotations=[{"/DA": "/F1 10 Tf"}], mutate=mutate)
-    assert result(compare_files([a, b]), "レイヤー: 担当者").status == Status.DIFFERENT
+    a = make_pdf(content="", annotations=[{"/Contents": "同じ文字", "/DA": "/F1 10 Tf"}])
+    b = make_pdf(content="", annotations=[{"/Contents": "同じ文字", "/DA": "/F1 10 Tf"}], mutate=mutate)
+    assert result(compare_files([a, b]), "レイヤー: 担当者").status == Status.FONT_ONLY
 
 
 def test_volatile_annotation_metadata_ignored(make_pdf):
     a = make_pdf(annotations=[{"/M": "D:20260101000000", "/NM": "first", "/Contents": "日本語"}])
     b = make_pdf(annotations=[{"/M": "D:20261015000000", "/NM": "second", "/Contents": "日本語"}])
-    assert compare_files([a, b]).status == Status.MATCH
+    assert statuses(compare_files([a, b])) == {Status.MATCH}
 
 
 def test_layer_annotation_order(make_pdf):
     a = make_pdf(annotations=[{"/Contents": "A"}, {"/Contents": "B"}])
     b = make_pdf(annotations=[{"/Contents": "B"}, {"/Contents": "A"}])
-    assert result(compare_files([a, b]), "レイヤー: 担当者").status == Status.DIFFERENT
+    assert result(compare_files([a, b]), "レイヤー: 担当者").status == Status.MATCH
+    assert result(compare_files([a, b]), "合成順序").status == Status.DIFFERENT
 
 
 def test_cross_layer_annotation_order(make_pdf):
@@ -141,7 +143,7 @@ def test_no_ocg_base_only(make_pdf):
         del w.root_object[NameObject("/OCProperties")]
         del w.pages[0]["/Resources"][NameObject("/Properties")]
     a = make_pdf(annotations=[], mutate=mutate)
-    assert compare_files([a, a]).status == Status.MATCH
+    assert statuses(compare_files([a, a])) == {Status.MATCH}
 
 
 def test_oc_image_layer(make_pdf):
@@ -150,14 +152,14 @@ def test_oc_image_layer(make_pdf):
         obj[NameObject("/OC")] = groups[0]
         w.pages[0]["/Resources"][NameObject("/XObject")] = pdf_value({"/Im": w._add_object(obj)})
     a = make_pdf(content="q /Im Do Q", mutate=mutate, annotations=[])
-    assert compare_files([a, a]).status == Status.MATCH
+    assert statuses(compare_files([a, a])) == {Status.MATCH}
 
 
 def test_broken_indirect_oc_reference(make_pdf):
     def mutate(w, groups):
         w.pages[0]["/Annots"][0].get_object()[NameObject("/OC")] = IndirectObject(999999, 0, w)
     a = make_pdf(mutate=mutate)
-    assert compare_files([a, a]).status == Status.UNKNOWN
+    assert Status.UNKNOWN in statuses(compare_files([a, a]))
 
 
 def test_unicode_not_collapsed(make_pdf):
@@ -178,6 +180,6 @@ def test_form_content_change(make_pdf, owner):
     a = make_pdf(content="q /Fm Do Q", mutate=form(1), annotations=[])
     b = make_pdf(content="q /Fm Do Q", mutate=form(2), annotations=[])
     report = compare_files([a, b])
-    assert result(report, "レイヤー: 担当者" if owner else "ベースPDF").status == Status.DIFFERENT
+    assert result(report, "レイヤー: 担当者" if owner else "レイヤーなし").status == Status.DIFFERENT
     if owner:
-        assert result(report, "ベースPDF").status == Status.MATCH
+        assert result(report, "レイヤーなし").status == Status.MATCH

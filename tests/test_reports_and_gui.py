@@ -1,3 +1,4 @@
+from conftest import statuses
 import csv
 import io
 import os
@@ -20,7 +21,7 @@ def test_report_roundtrip_and_exports(make_pdf, tmp_path):
     report = compare_files([make_pdf(), make_pdf(text="Changed")])
     assert from_json(to_json(report)) == report
     assert "不一致" in to_text(report)
-    assert list(csv.reader(io.StringIO(to_csv(report))))[0][0] == "左ファイル"
+    assert list(csv.reader(io.StringIO(to_csv(report))))[0][0] == "基準PDF"
     for suffix in (".txt", ".csv", ".json"):
         path = tmp_path / ("report" + suffix)
         save_report(report, path)
@@ -29,7 +30,7 @@ def test_report_roundtrip_and_exports(make_pdf, tmp_path):
 
 @pytest.mark.parametrize("value", ["=evil", "+evil", "-evil", "@evil", "   =evil"])
 def test_csv_formula_escape(value):
-    report = Report([value, "b"], [Result(value, "b", value, Status.DIFFERENT, value)], configuration_ok=True)
+    report = Report([value, "b"], [Result(value, "b", value, Status.DIFFERENT, value)])
     rows = list(csv.reader(io.StringIO(to_csv(report))))
     assert rows[-1][0].startswith("'")
     assert rows[-1][-1].startswith("'")
@@ -54,12 +55,12 @@ def test_hardlink_overwrite_prohibited(make_pdf, tmp_path):
         save_report(compare_files([a, a]), alias)
 
 
-@pytest.mark.parametrize("changed, code", [(False, 0), (True, 1)])
+@pytest.mark.parametrize("changed, code", [(False, 0), (True, 0)])
 def test_cli(make_pdf, runtime_app, changed, code):
     a, b = make_pdf(), make_pdf(text="Changed" if changed else "Base")
     run = subprocess.run([sys.executable, str(runtime_app / "main.py"), "--json", str(a), str(b)], capture_output=True, text=True, encoding="utf-8", timeout=30)
     assert run.returncode == code, run.stderr
-    assert from_json(run.stdout).status == (Status.DIFFERENT if changed else Status.MATCH)
+    assert (Status.DIFFERENT if changed else Status.MATCH) in statuses(from_json(run.stdout))
 
 
 def test_cli_error_exit(runtime_app):
@@ -94,15 +95,17 @@ def test_gui_subprocess_and_details(make_pdf, gui):
         root.update()
         time.sleep(0.02)
     assert app.report is not None, app.detail.get("1.0", "end")
-    assert app.report.status == Status.DIFFERENT
-    assert len(app.tree.get_children()) == 4
-    app.tree.selection_set("0")
+    assert Status.DIFFERENT in statuses(app.report)
+    assert len(app.tree.get_children()) == 5
+    app.tree.selection_set("1")
     app.show_detail()
     assert "不一致" in app.detail.get("1.0", "end")
     app.file_list.selection_set(1)
     old = list(app.files)
     app.move(-1)
     assert app.files == list(reversed(old))
+    assert app.reference_label.cget("text") == f"基準PDF: {app.files[0]}"
+    assert "[基準PDF]" in app.file_list.get(0)
     assert app.report is None
 
 
@@ -115,6 +118,26 @@ def test_gui_cancel(make_pdf, gui):
     assert app.process is None
     assert app.report is None
     assert "中止" in app.status.get()
+
+
+def test_gui_preserves_all_group_statuses_and_saved_results(gui, tmp_path):
+    _, app = gui
+    report = Report(["baseline.pdf", "target.pdf"], [
+        Result("baseline.pdf", "target.pdf", f"レイヤー: {status.name}", status, "詳細", [{"before": ["A"], "after": ["B"]}] if status == Status.FONT_ONLY else [])
+        for status in Status
+    ])
+    app.render_report(report)
+    observed = [app.tree.item(i, "values")[3] for i in app.tree.get_children()]
+    assert observed == [s.value for s in Status]
+    assert "総合" not in app.status.get()
+    app.tree.selection_set("1")
+    app.show_detail()
+    assert Status.FONT_ONLY in app.detail.get("1.0", "end")
+    for extension in ("json", "csv", "txt"):
+        path = tmp_path / ("groups." + extension)
+        save_report(report, path)
+        assert Status.FONT_ONLY in path.read_text(encoding="utf-8-sig")
+    assert from_json((tmp_path / "groups.json").read_text(encoding="utf-8")) == report
 
 
 def test_gui_timeout_never_success(make_pdf, gui, monkeypatch):
@@ -144,7 +167,7 @@ def test_offline_source_bundle(make_pdf, tmp_path):
     # -S excludes site-packages: the installed pypdf/pytest cannot help.
     run = subprocess.run([sys.executable, "-S", str(destination / "main.py"), "--json", str(a), str(a)], capture_output=True, text=True, encoding="utf-8", timeout=30)
     assert run.returncode == 0, run.stderr
-    assert from_json(run.stdout).status == Status.MATCH
+    assert statuses(from_json(run.stdout)) == {Status.MATCH}
     assert not list(destination.rglob("*.pyc"))
 
     # The installed base interpreter and source files suffice. -S disables
@@ -157,10 +180,10 @@ def test_offline_source_bundle(make_pdf, tmp_path):
     assert not (destination / ".venv").exists()
     start = subprocess.run(f'cmd /d /c start.bat --json "{a}" "{a}"', cwd=destination, env=env, capture_output=True, text=True, encoding="utf-8", timeout=30)
     assert start.returncode == 0, start.stderr + start.stdout
-    assert from_json(start.stdout).status == Status.MATCH
+    assert statuses(from_json(start.stdout)) == {Status.MATCH}
     failed = subprocess.run('cmd /d /c start.bat --json "missing.pdf" "missing.pdf"', cwd=destination, env=env, capture_output=True, text=True, encoding="utf-8", timeout=30)
     assert failed.returncode == 2
-    assert from_json(failed.stdout).status == Status.UNKNOWN
+    assert Status.UNKNOWN in statuses(from_json(failed.stdout))
 
 
 def test_runtime_missing_manual_source(runtime_app, tmp_path):
@@ -213,7 +236,7 @@ def test_start_ignores_project_venv(runtime_app, tmp_path, make_pdf):
     a = make_pdf()
     run = subprocess.run(f'cmd /d /c start.bat --json "{a}" "{a}"', cwd=destination, env={**os.environ, "DIFFPDF_PYTHON": sys._base_executable}, capture_output=True, text=True, encoding="utf-8", timeout=30)
     assert run.returncode == 0, run.stderr
-    assert from_json(run.stdout).status == Status.MATCH
+    assert statuses(from_json(run.stdout)) == {Status.MATCH}
 
 
 def test_invalid_python_override_is_reported(runtime_app):
@@ -244,7 +267,7 @@ try:
         root.update()
         time.sleep(0.02)
     assert app.report is not None, app.detail.get('1.0', 'end')
-    assert app.report.status == Status.MATCH
+    assert app.report.results and all(r.status == Status.MATCH for r in app.report.results)
 finally:
     app.close()
 """

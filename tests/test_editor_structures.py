@@ -1,3 +1,4 @@
+from conftest import statuses
 """Synthetic regressions for structures observed in Editor 11.1 output.
 
 The user's PDFs and native Editor output are deliberately kept out of Git.
@@ -14,13 +15,13 @@ from pdf_layer_compare.normalize import Canonicalizer
 def test_empty_transition_is_default(make_pdf):
     a = make_pdf()
     b = make_pdf(mutate=lambda w, g: w.pages[0].update(pdf_value({"/Trans": {}})))
-    assert compare_files([a, b]).status == Status.MATCH
+    assert statuses(compare_files([a, b])) == {Status.MATCH}
 
 
 def test_transition_parameters_retained(make_pdf):
     a = make_pdf()
     b = make_pdf(mutate=lambda w, g: w.pages[0].update(pdf_value({"/Trans": {"/S": "/Dissolve", "/D": 2}})))
-    assert result(compare_files([a, b]), "ベースPDF").status == Status.DIFFERENT
+    assert result(compare_files([a, b]), "PDF本体").status == Status.DIFFERENT
 
 
 def editor_state(state="/ON"):
@@ -39,9 +40,9 @@ def editor_state(state="/ON"):
 def test_editor_usage_and_auto_state(make_pdf):
     a = make_pdf(mutate=editor_state())
     b = make_pdf(mutate=editor_state("/OFF"))
-    assert compare_files([a, a]).status == Status.MATCH
+    assert statuses(compare_files([a, a])) == {Status.MATCH}
     report = compare_files([a, b])
-    assert result(report, "ベースPDF").status == Status.MATCH
+    assert result(report, "レイヤーなし").status == Status.MATCH
     assert result(report, "レイヤー: 担当者").status == Status.DIFFERENT
 
 
@@ -53,7 +54,7 @@ def test_editor_usage_and_auto_state(make_pdf):
 ])
 def test_unsupported_auto_state(make_pdf, entry):
     a = make_pdf(mutate=lambda w, g: w.root_object["/OCProperties"]["/D"].update(pdf_value({"/AS": [entry]})))
-    assert compare_files([a, a]).status == Status.UNKNOWN
+    assert Status.UNKNOWN in statuses(compare_files([a, a]))
 
 
 @pytest.mark.parametrize("tag,attribute", [
@@ -64,8 +65,8 @@ def test_marked_properties_preserved(make_pdf, tag, attribute):
     content = f"q /{tag} << {attribute} >> BDC BT /F1 12 Tf (X) Tj ET EMC Q"
     a = make_pdf(content=content)
     b = make_pdf(content=content.replace("Watermark", "Header").replace("Japanese text", "Changed text"))
-    assert compare_files([a, a]).status == Status.MATCH
-    assert result(compare_files([a, b]), "ベースPDF").status == Status.DIFFERENT
+    assert statuses(compare_files([a, a])) == {Status.MATCH}
+    assert result(compare_files([a, b]), "レイヤーなし").status == Status.DIFFERENT
 
 
 def test_named_marked_properties(make_pdf):
@@ -74,8 +75,8 @@ def test_named_marked_properties(make_pdf):
     content = "q /Span /P0 BDC BT /F1 12 Tf (X) Tj ET EMC Q"
     a = make_pdf(content=content, mutate=prop("A"))
     b = make_pdf(content=content, mutate=prop("B"))
-    assert compare_files([a, a]).status == Status.MATCH
-    assert result(compare_files([a, b]), "ベースPDF").status == Status.DIFFERENT
+    assert statuses(compare_files([a, a])) == {Status.MATCH}
+    assert result(compare_files([a, b]), "レイヤーなし").status == Status.DIFFERENT
 
 
 def test_empty_form_annotation_fonts(make_pdf):
@@ -83,12 +84,12 @@ def test_empty_form_annotation_fonts(make_pdf):
         return lambda w, g: w.root_object.update(pdf_value({"/AcroForm": {
             "/Fields": [], "/DR": {"/Font": {"/F0": {"/Type": "/Font", "/Subtype": "/Type1", "/BaseFont": name}}}
         }}))
-    a = make_pdf(mutate=font("/Helvetica"))
-    b = make_pdf(mutate=font("/Courier"))
-    assert compare_files([a, a]).status == Status.MATCH
+    a = make_pdf(mutate=font("/Helvetica"), annotations=[{"/Contents": "同じ文字", "/DA": "/F0 10 Tf"}])
+    b = make_pdf(mutate=font("/Courier"), annotations=[{"/Contents": "同じ文字", "/DA": "/F0 10 Tf"}])
+    assert statuses(compare_files([a, a])) == {Status.MATCH}
     report = compare_files([a, b])
-    assert result(report, "ベースPDF").status == Status.MATCH
-    assert result(report, "レイヤー: 担当者").status == Status.DIFFERENT
+    assert result(report, "レイヤーなし").status == Status.MATCH
+    assert result(report, "レイヤー: 担当者").status == Status.FONT_ONLY
 
 
 @pytest.mark.parametrize("form", [
@@ -99,7 +100,7 @@ def test_empty_form_annotation_fonts(make_pdf):
 ])
 def test_interactive_or_unsupported_forms(make_pdf, form):
     a = make_pdf(mutate=lambda w, g: w.root_object.update(pdf_value({"/AcroForm": form})))
-    assert compare_files([a, a]).status == Status.UNKNOWN
+    assert Status.UNKNOWN in statuses(compare_files([a, a]))
 
 
 def test_shared_resource_cache_does_not_mask_cycles():
@@ -111,6 +112,6 @@ def test_shared_resource_cache_does_not_mask_cycles():
         normal.value(shared, active=frozenset({id(shared)}))
 
 
-def test_demo_links_remain_unknown(make_pdf):
+def test_uri_demo_links_are_structurally_compared(make_pdf):
     a = make_pdf(annotations=[{"owner": None, "/Subtype": "/Link", "/A": {"/S": "/URI", "/URI": "https://example.invalid/"}}])
-    assert compare_files([a, a]).status == Status.UNKNOWN
+    assert statuses(compare_files([a, a])) == {Status.MATCH}

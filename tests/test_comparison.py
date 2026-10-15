@@ -1,5 +1,5 @@
+from conftest import statuses
 from hashlib import sha256
-from itertools import combinations
 
 import pytest
 from pypdf.generic import ArrayObject, DictionaryObject, NameObject
@@ -19,7 +19,7 @@ def test_identical_and_sources_unchanged(make_pdf):
     a = make_pdf()
     digest = sha256(a.read_bytes()).digest()
     report = compare_files([a, a])
-    assert report.status == Status.MATCH, report
+    assert statuses(report) == {Status.MATCH}, report
     assert sha256(a.read_bytes()).digest() == digest
 
 
@@ -28,15 +28,18 @@ def test_object_numbers_and_compression(make_pdf):
     b = make_pdf(junk=True, compressed=True)
     assert a.read_bytes() != b.read_bytes()
     report = compare_files([a, b])
-    assert report.status == Status.MATCH, report
+    assert statuses(report) == {Status.MATCH}, report
 
 
 @pytest.mark.parametrize("names", [("担当者", "審査者"), ("担当者",), ("担当者", "担当者")])
-def test_configuration_errors_stop_content(make_pdf, names):
+def test_layer_name_changes_do_not_stop_other_groups(make_pdf, names):
     report = compare_files([make_pdf(), make_pdf(names=names)])
-    assert not report.configuration_ok
-    assert report.errors
-    assert not report.results
+    assert result(report, "PDF本体").status == Status.MATCH
+    assert result(report, "レイヤーなし").status == Status.MATCH
+    if names == ("担当者", "担当者"):
+        assert result(report, "レイヤー: 担当者").status == Status.UNKNOWN
+    else:
+        assert result(report, "レイヤー: 確認者").status == Status.REMOVED
 
 
 @pytest.mark.parametrize("change", [
@@ -56,7 +59,7 @@ def test_annotation_attribute_changes(make_pdf, change):
     b = make_pdf(annotations=[{"/Contents": "日本語の注釈", **change}])
     report = compare_files([a, b])
     assert result(report, "レイヤー: 担当者").status == Status.DIFFERENT, report
-    assert result(report, "ベースPDF").status == Status.MATCH
+    assert result(report, "レイヤーなし").status == Status.MATCH
     assert result(report, "レイヤー: 確認者").status == Status.MATCH
 
 
@@ -88,14 +91,14 @@ def test_annotation_moved_layer(make_pdf):
 ])
 def test_base_changes(make_pdf, kwargs):
     report = compare_files([make_pdf(), make_pdf(**kwargs)])
-    assert result(report, "ベースPDF").status == Status.DIFFERENT, report
+    component = "PDF本体" if "pages" in kwargs or "mutate" in kwargs else "レイヤーなし"
+    assert result(report, component).status == Status.DIFFERENT, report
 
 
 def test_unassigned_annotation(make_pdf):
     a = make_pdf(annotations=[{"owner": None}])
     report = compare_files([a, a])
-    assert report.status == Status.UNKNOWN
-    assert "未所属" in report.results[0].detail
+    assert result(report, "レイヤーなし").status == Status.MATCH
 
 
 def test_unregistered_ocg(make_pdf):
@@ -103,21 +106,21 @@ def test_unregistered_ocg(make_pdf):
         unknown = w._add_object(pdf_value({"/Type": "/OCG", "/Name": "unknown"}))
         w.pages[0]["/Annots"][0].get_object()[NameObject("/OC")] = unknown
     a = make_pdf(mutate=mutate)
-    assert compare_files([a, a]).status == Status.UNKNOWN
+    assert Status.UNKNOWN in statuses(compare_files([a, a]))
 
 
 def test_ocmd(make_pdf):
     def mutate(w, groups):
         w.pages[0]["/Annots"][0].get_object()[NameObject("/OC")] = w._add_object(pdf_value({"/Type": "/OCMD", "/OCGs": groups, "/P": "/AnyOn"}))
     a = make_pdf(mutate=mutate)
-    assert "OCMD" in compare_files([a, a]).results[0].detail
+    assert "OCMD" in result(compare_files([a, a]), "レイヤー: 担当者").detail
 
 
 def test_corrupt_pdf(make_pdf, tmp_path):
     bad = tmp_path / "bad.pdf"
     bad.write_bytes(b"%PDF-1.7\nnot a pdf")
     report = compare_files([make_pdf(), bad])
-    assert report.status == Status.UNKNOWN
+    assert Status.UNKNOWN in statuses(report)
     assert report.errors
 
 
@@ -129,16 +132,16 @@ def test_marked_content_and_flattening(make_pdf):
     b = make_pdf(content=LAYER.replace("30 40", "31 40"), annotations=[])
     report = compare_files([a, b])
     assert result(report, "レイヤー: 担当者").status == Status.DIFFERENT, report
-    assert result(report, "ベースPDF").status == Status.MATCH
+    assert result(report, "レイヤーなし").status == Status.MATCH
     flattened = make_pdf(content="q 1 0 0 RG 10 20 30 40 re S Q", annotations=[])
     report = compare_files([a, flattened])
-    assert result(report, "ベースPDF").status == Status.DIFFERENT
+    assert result(report, "レイヤーなし").status == Status.DIFFERENT
     assert result(report, "レイヤー: 担当者").status == Status.DIFFERENT
 
 
 def test_bdc_outside_q(make_pdf):
     a = make_pdf(content="/OC /L0 BDC q 10 20 30 40 re S Q EMC")
-    assert compare_files([a, a]).status == Status.MATCH
+    assert statuses(compare_files([a, a])) == {Status.MATCH}
 
 
 @pytest.mark.parametrize("content", [
@@ -153,7 +156,7 @@ def test_bdc_outside_q(make_pdf):
 def test_unsafe_content_unknown(make_pdf, content):
     a = make_pdf(content=content)
     report = compare_files([a, a])
-    assert report.status == Status.UNKNOWN, report
+    assert Status.UNKNOWN in statuses(report), report
 
 
 def test_form_oc(make_pdf):
@@ -162,7 +165,7 @@ def test_form_oc(make_pdf):
         form[NameObject("/OC")] = groups[0]
         w.pages[0]["/Resources"][NameObject("/XObject")] = pdf_value({"/Fm": w._add_object(form)})
     a = make_pdf(content="q /Fm Do Q", mutate=mutate)
-    assert compare_files([a, a]).status == Status.MATCH
+    assert statuses(compare_files([a, a])) == {Status.MATCH}
 
 
 def test_form_inner_oc_unknown(make_pdf):
@@ -171,7 +174,7 @@ def test_form_inner_oc_unknown(make_pdf):
         form[NameObject("/Resources")] = w.pages[0]["/Resources"]
         w.pages[0]["/Resources"][NameObject("/XObject")] = pdf_value({"/Fm": w._add_object(form)})
     a = make_pdf(content="q /Fm Do Q", mutate=mutate)
-    assert compare_files([a, a]).status == Status.UNKNOWN
+    assert Status.UNKNOWN in statuses(compare_files([a, a]))
 
 
 def test_appearance_changes(make_pdf):
@@ -189,16 +192,16 @@ def test_visibility_state(make_pdf):
         w.root_object["/OCProperties"]["/D"][NameObject("/OFF")] = ArrayObject([groups[0]])
     report = compare_files([make_pdf(), make_pdf(mutate=mutate)])
     assert result(report, "レイヤー: 担当者").status == Status.DIFFERENT
-    assert result(report, "ベースPDF").status == Status.MATCH
+    assert result(report, "レイヤーなし").status == Status.MATCH
 
 
-@pytest.mark.parametrize("count, pairs", [(2, 1), (3, 3), (4, 6)])
-def test_all_pairs_order(make_pdf, count, pairs):
+@pytest.mark.parametrize("count, pairs", [(2, 1), (3, 2), (4, 3)])
+def test_reference_comparison_order(make_pdf, count, pairs):
     files = [make_pdf() for _ in range(count)]
     report = compare_files(files)
-    assert report.status == Status.MATCH
+    assert statuses(report) == {Status.MATCH}
     observed = list(dict.fromkeys((r.left, r.right) for r in report.results))
-    assert observed == list(combinations(map(str, files), 2))
+    assert observed == [(str(files[0]), str(p)) for p in files[1:]]
     assert len(observed) == pairs
 
 
@@ -210,7 +213,7 @@ def test_input_count(make_pdf, count):
 @pytest.mark.parametrize("attribute", ["/AcroForm", "/OpenAction", "/Names", "/StructTreeRoot"])
 def test_unknown_catalog_structure(make_pdf, attribute):
     a = make_pdf(mutate=lambda w, g: w.root_object.update(pdf_value({attribute: {}})))
-    assert compare_files([a, a]).status == Status.UNKNOWN
+    assert Status.UNKNOWN in statuses(compare_files([a, a]))
 
 
 def test_unaffected_pair_continues(make_pdf):

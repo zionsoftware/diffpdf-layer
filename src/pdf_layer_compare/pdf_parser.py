@@ -8,13 +8,27 @@ from pypdf import PdfReader
 from pypdf.generic import DictionaryObject, IndirectObject, StreamObject
 
 from .annotation_analyzer import analyze_annotations
-from .base_analyzer import analyze_page, validate_resource
-from .model import Snapshot, Unsupported
-from .normalize import Canonicalizer, array, check_numeric_precision, dictionary, stream_data
+from .base_analyzer import DrawingAnalyzer, page_attributes, validate_resource
+from .model import BODY, COMPOSITION, UNLAYERED, Content, Group, Snapshot, Unsupported, combine, layer_key
+from .normalize import Canonicalizer, array, check_numeric_precision, content_operations, dictionary, resolve, stream_data
 from .ocg_analyzer import OCGAnalyzer
 
 MAX_FILE = 128 * 1024 * 1024
 CATALOG_KEYS = {"/Type", "/Pages", "/OCProperties", "/Metadata", "/Version", "/Lang", "/PageLayout", "/PageMode", "/ViewerPreferences", "/MarkInfo", "/AcroForm"}
+
+
+def validate_page_tree(ref, active=frozenset(), depth=0):
+    node = dictionary(ref, "ページツリー")
+    if id(node) in active or depth > 50:
+        raise Unsupported("ページツリーの循環または深度超過")
+    if node.get("/Type") == "/Page":
+        return 1
+    if node.get("/Type") != "/Pages" or set(node) - {"/Type", "/Kids", "/Count", "/Parent", "/Resources", "/MediaBox", "/CropBox", "/Rotate"}:
+        raise Unsupported("未対応または不正なページツリー属性")
+    total = sum(validate_page_tree(kid, active | {id(node)}, depth+1) for kid in array(node.get("/Kids"), "Pages Kids"))
+    if resolve(node.get("/Count")) != total:
+        raise Unsupported("ページツリーの Count と実ページ数が不一致")
+    return total
 
 
 @contextmanager
@@ -64,11 +78,30 @@ def open_document(path):
             snapshot.ocg = ocg
             return snapshot, reader
     except Exception as exc:
-        snapshot.configuration_error = f"{type(exc).__name__}: {exc}"
+        snapshot.file_error = f"{type(exc).__name__}: {exc}"
         return snapshot, None
 
 
 def analyze_document(snapshot, reader):
+    ocg = snapshot.ocg
+    snapshot.groups = {key: Group() for key in (BODY, UNLAYERED, COMPOSITION, *(layer_key(n) for n in snapshot.names))}
+    groups = snapshot.groups
+
+    def fail(keys, error):
+        for key in keys:
+            groups[key].errors.append(str(error))
+
+    drawing_keys = [UNLAYERED, *(layer_key(n) for n in snapshot.names)]
+    key_for = lambda n: UNLAYERED if n is None else layer_key(n)
+    for name in snapshot.names:
+        groups[layer_key(name)].errors.extend(ocg.errors.get(name, []) + ocg.global_errors)
+        if name in ocg.states:
+            value = ocg.states[name]
+            groups[layer_key(name)].values.append(Content(value, value))
+    if ocg.global_errors and not ocg.registry_complete:
+        fail(groups, "OCG 登録一覧を安全に取得できません: " + " / ".join(ocg.global_errors))
+    elif ocg.global_errors and not snapshot.names:
+        fail([BODY], "OCG 構成が不正です: " + " / ".join(ocg.global_errors))
     try:
         with parser_messages() as messages:
             root = reader.root_object
@@ -77,34 +110,59 @@ def analyze_document(snapshot, reader):
                 raise Unsupported(f"未対応の Catalog 属性: {', '.join(sorted(extra))}")
             if not 1 <= len(reader.pages) <= 2000:
                 raise Unsupported("ページ数が対応範囲外 (1～2000)")
-            ocg = snapshot.ocg
+            if validate_page_tree(root.raw_get("/Pages")) != len(reader.pages):
+                raise Unsupported("ページツリーとページ一覧が不一致")
+            form_error = ""
             if "/AcroForm" in root:
-                form = dictionary(root["/AcroForm"], "AcroForm")
-                if set(form) - {"/Fields", "/DR"} or array(form.get("/Fields"), "AcroForm Fields"):
-                    raise Unsupported("非空の AcroForm または未対応のフォーム属性")
-                if "/DR" in form:
-                    dictionary(form["/DR"], "AcroForm DR")
-                validate_resource(form, reader, ocg)
-                Canonicalizer(ocg).value(form)
-            # An empty Fields tree has no base-page widget. Its DR supplies
-            # annotation fonts and is compared with annotations instead.
+                try:
+                    form = dictionary(root["/AcroForm"], "AcroForm")
+                    if set(form) - {"/Fields", "/DR"} or array(form.get("/Fields"), "AcroForm Fields"):
+                        raise Unsupported("非空の AcroForm または未対応のフォーム属性")
+                    if "/DR" in form:
+                        dictionary(form["/DR"], "AcroForm DR")
+                except Exception as exc:
+                    form_error = str(exc)
+                    fail([BODY, UNLAYERED], exc)
             attrs = DictionaryObject({k: v for k, v in root.items() if k not in {"/Pages", "/OCProperties", "/Metadata", "/AcroForm"}})
             validate_resource(attrs, reader, ocg)
-            snapshot.base = [Canonicalizer(ocg).value(attrs)]
-            snapshot.layers = {n: {"state": (ocg.configuration, ocg.attributes[n]), "drawings": [], "annotations": []} for n in ocg.names}
+            value = (len(reader.pages), Canonicalizer(ocg).value(attrs))
+            groups[BODY].values.append(Content(value, value))
             for index, page in enumerate(reader.pages, 1):
                 try:
-                    base, drawings, composition = analyze_page(page, reader, ocg)
-                    annotations, annotation_order = analyze_annotations(page, reader, ocg, index)
+                    groups[BODY].values.append(page_attributes(page, ocg))
                 except Exception as exc:
-                    raise Unsupported(f"ページ {index}: {exc}") from exc
-                snapshot.base.append(base)
-                snapshot.composition.append((index, composition, annotation_order))
-                for name in snapshot.names:
-                    snapshot.layers[name]["drawings"].extend((index, d) for d in drawings[name])
-                    snapshot.layers[name]["annotations"].extend(annotations[name])
+                    fail(groups, f"ページ {index} の構造: {exc}")
+                try:
+                    resources = dictionary(page.get("/Resources", DictionaryObject()), "ページ Resources")
+                    ops = content_operations(page.raw_get("/Contents"), reader) if "/Contents" in page else []
+                    drawings, errors, order = DrawingAnalyzer(reader, ocg).partition(ops, resources)
+                    for name, values in drawings.items():
+                        if values:
+                            groups[key_for(name)].values.append(combine((index, "drawings"), values))
+                        if errors[name]:
+                            fail([key_for(name)], f"ページ {index}: " + "\n".join(errors[name]))
+                    if order:
+                        value = (index, tuple(order))
+                        groups[COMPOSITION].values.append(Content(value, value))
+                    if any(errors.values()):
+                        fail([COMPOSITION], f"ページ {index}: 描画順序の一部を解析できません")
+                except Exception as exc:
+                    fail([*drawing_keys, COMPOSITION], f"ページ {index} 本文: {exc}")
+                try:
+                    annotations, errors, order, order_errors = analyze_annotations(page, reader, ocg, form_error)
+                    for name, values in annotations.items():
+                        if values:
+                            groups[key_for(name)].values.append(combine((index, "annotations"), values, unordered=True))
+                        if errors[name]:
+                            fail([key_for(name)], f"ページ {index}: " + "\n".join(errors[name]))
+                    if order.exact[1]:
+                        groups[COMPOSITION].values.append(combine(index, [order]))
+                    if order_errors:
+                        fail([COMPOSITION], f"ページ {index}: " + "\n".join(order_errors))
+                except Exception as exc:
+                    fail([*drawing_keys, COMPOSITION], f"ページ {index} 注釈一覧: {exc}")
             if messages:
                 raise Unsupported("PDF 解析警告: " + " / ".join(messages))
     except Exception as exc:
-        snapshot.errors.append(f"{type(exc).__name__}: {exc}")
+        fail(groups, f"{type(exc).__name__}: {exc}")
     return snapshot

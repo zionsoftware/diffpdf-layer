@@ -137,7 +137,15 @@ class Canonicalizer:
                 skip = {"/Length"}
                 if not opaque:
                     skip |= {"/Filter", "/DecodeParms"}
-            items = tuple((str(k), sub(v)) for k, v in sorted(obj.items()) if k not in skip)
+            def item(key, value):
+                # A six-letter subset tag is a storage identifier. Keep the
+                # actual family and every other font attribute/program byte.
+                if key in {"/BaseFont", "/FontName"} and isinstance(resolve(value), NameObject):
+                    value = NameObject(re.sub(r"^/[A-Z]{6}\+", "/", str(resolve(value))))
+                return sub(value)
+            if obj.get("/Type") == "/Font":
+                skip.add("/Name")  # obsolete font resource identifier
+            items = tuple((str(k), item(k, v)) for k, v in sorted(obj.items()) if k not in skip)
             result = ("stream", items, sha256(data).hexdigest()) if data is not None else items
             self.cache[id(obj)] = (obj, result)
             return result

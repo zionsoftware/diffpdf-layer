@@ -8,9 +8,19 @@ class OCGAnalyzer:
     def __init__(self, root):
         self.groups = {}
         self.by_object = {}
+        self.errors = {}
+        self.global_errors = []
+        self.states = {}
+        self.registry_complete = False
+        try:
+            self.load(root)
+        except Exception as exc:
+            self.global_errors.append(str(exc))
+
+    def load(self, root):
         props = dictionary(root.get("/OCProperties", DictionaryObject()), "OCProperties")
         if not props:
-            self.configuration = ()
+            self.registry_complete = True
             return
         if set(props) - {"/OCGs", "/D", "/Configs"}:
             raise Unsupported("未知の OCProperties キー")
@@ -25,23 +35,48 @@ class OCGAnalyzer:
             if not isinstance(name, TextStringObject) or not name:
                 raise Unsupported("レイヤー名が不正または空")
             if name in self.groups:
-                raise Unsupported(f"レイヤー名が重複: {name}")
-            if set(group) - {"/Type", "/Name", "/Intent", "/Usage"}:
-                raise Unsupported(f"OCG {name}: 未対応の属性")
-            if "/Intent" in group:
-                self.validate_intent(group["/Intent"])
-            if "/Usage" in group:
-                self.validate_usage(group["/Usage"])
+                self.errors.setdefault(str(name), []).append(f"レイヤー名が重複: {name}")
             self.groups[str(name)] = group
             self.by_object[id(group)] = str(name)
+            try:
+                if set(group) - {"/Type", "/Name", "/Intent", "/Usage"}:
+                    raise Unsupported(f"OCG {name}: 未対応の属性")
+                if "/Intent" in group:
+                    self.validate_intent(group["/Intent"])
+                if "/Usage" in group:
+                    self.validate_usage(group["/Usage"])
+            except Exception as exc:
+                self.errors.setdefault(str(name), []).append(str(exc))
+        self.registry_complete = True
         default = dictionary(props.get("/D"), "OCG 既定設定 D")
         self.validate_config(default)
         for config in array(props.get("/Configs", ArrayObject()), "Configs"):
             self.validate_config(dictionary(config))
+        configs = [default, *array(props.get("/Configs", ArrayObject()), "Configs")]
+        for name, group in self.groups.items():
+            self.states[name] = (Canonicalizer().value(group), tuple(self.group_config(dictionary(c), name) for c in configs))
+
+    def group_config(self, config, name):
+        """Project visibility/locking/automatic state onto its actual group."""
         normal = Canonicalizer(self)
-        # Group order in OCGs is storage order, not visual order; /Order remains.
-        self.configuration = normal.value(DictionaryObject({k: v for k, v in props.items() if k != "/OCGs"}))
-        self.attributes = {name: Canonicalizer().value(group) for name, group in self.groups.items()}
+        selected = lambda key: name in [self.owner(r) for r in array(config.get(key, ArrayObject()))]
+        state = config.get("/BaseState", "/ON")
+        if selected("/ON"):
+            state = "/ON"
+        if selected("/OFF"):
+            state = "/OFF"
+        automatic = []
+        for raw in array(config.get("/AS", ArrayObject())):
+            entry = dictionary(raw)
+            if "/OCGs" not in entry or name in [self.owner(r) for r in array(entry["/OCGs"])]:
+                automatic.append(normal.value(DictionaryObject({k: v for k, v in entry.items() if k != "/OCGs"})))
+        radio = []
+        for refs in array(config.get("/RBGroups", ArrayObject())):
+            names = tuple(sorted(self.owner(r) for r in array(refs)))
+            if name in names:
+                radio.append(names)
+        return (str(state), selected("/Locked"), tuple(automatic), tuple(sorted(radio)),
+                normal.value(config.get("/Intent", NameObject("/View"))))
 
     @property
     def names(self):

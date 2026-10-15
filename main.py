@@ -36,13 +36,14 @@ def main():
         return 0
     if args.cli or args.json:
         from pdf_layer_compare.comparator import compare_files
-        from pdf_layer_compare.model import Status
         from pdf_layer_compare.report import save_report, to_json, to_text
         report = compare_files(args.files)
         if args.output:
             save_report(report, args.output)
         print(to_json(report) if args.json else to_text(report))
-        return {Status.MATCH: 0, Status.DIFFERENT: 1, Status.UNKNOWN: 2}[report.status]
+        # Exit codes describe command execution, never whole-PDF identity.
+        # Every group's judgment is in the report, including UNKNOWN.
+        return 2 if report.errors else 0
     from pdf_layer_compare.gui import launch
     launch(args.files)
     return 0
