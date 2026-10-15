@@ -77,7 +77,7 @@ GUI 内のネイティブ DnD は実装していない。追加バイナリ依�
 
 ## 7. オフライン導入
 
-`tools/prepare_offline.py` で、プログラムのソースと、インストール済み pypdf 6.20.1 の純 Python ソース・ライセンスを `dist/offline-source` に作成する。EXE / DLL / .pyd / .pyc / wheel / 開発 venv はコピーしない。会社の審査後、このソースフォルダーのみをコピーし、承認済み Python から `setup.bat`、`start.bat` を実行する。
+`tools/prepare_offline.py` で、プログラムのソースと、インストール済み pypdf 6.20.1 の純 Python ソース・ライセンスを `dist/offline-source` に作成する。EXE / DLL / .pyd / .pyc / wheel / 開発 venv はコピーしない。このソースフォルダーをオフライン環境へコピーし、インストール済み Python を使用して `setup.bat`、`start.bat` を実行する。
 
 通常の pip による sdist ビルドに依存せず、vendor ソースを直接 import するため、オフラインでビルドツールを取得する必要はない。pypdf の著作権表示・ライセンスを維持する。pytest と開発依存のオフライン配布は別途手配が必要だが、本番比較には不要。詳細は [README](../README.md)。
 

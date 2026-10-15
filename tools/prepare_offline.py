@@ -48,7 +48,7 @@ def build_bundle(destination):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="オフライン持込用ソース一式を作成")
+    parser = argparse.ArgumentParser(description="オフライン環境用のソース一式を作成")
     parser.add_argument("destination", nargs="?", default=str(ROOT / "dist" / "offline-source"))
     args = parser.parse_args()
     print(build_bundle(args.destination))

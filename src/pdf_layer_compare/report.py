@@ -19,7 +19,7 @@ def from_json(text):
 
 
 def to_text(report):
-    lines = ["PDFレイヤー同一性検証結果", f"総合: {report.status}", "一致は対応範囲内の構造比較の結果です。業務上の承認判定ではありません。", "入力順:"]
+    lines = ["PDFレイヤー同一性検証結果", f"総合: {report.status}", "一致は対応範囲内の構造比較の結果です。利用時の最終判断は利用者が行ってください。", "入力順:"]
     lines += [f"{i}. {p}" for i, p in enumerate(report.files, 1)]
     lines += [f"構成検査: {'正常' if report.configuration_ok else 'エラー (内容比較なし)'}"]
     lines += report.errors
