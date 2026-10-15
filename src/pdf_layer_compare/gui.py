@@ -149,7 +149,7 @@ class Application:
         self.generation += 1
         generation = self.generation
         try:
-            process = subprocess.Popen([sys.executable, str(PROJECT / "main.py"), "--json", *self.files], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            process = subprocess.Popen([sys.executable, "-S", str(PROJECT / "main.py"), "--json", *self.files], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         except OSError as exc:
             self.status.set("検証不能: 比較プロセスの起動失敗")
             self.set_detail(str(exc))

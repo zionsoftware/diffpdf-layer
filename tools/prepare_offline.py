@@ -28,11 +28,11 @@ def build_bundle(destination):
     if not source_files or not licenses:
         raise ValueError("pypdf のソースまたはライセンスを見つけられません")
     destination.mkdir(parents=True)
-    for name in ("main.py", "start.bat", "setup.bat", "README.md", "LICENSE", "requirements.txt", "requirements-dev.txt", "pyproject.toml"):
+    for name in ("main.py", "start.bat", "README.md", "LICENSE", "requirements.txt", "requirements-dev.txt", "pyproject.toml"):
         shutil.copyfile(ROOT / name, destination / name)
     for folder in ("src", "tests", "tools", "docs"):
         for path in (ROOT / folder).rglob("*"):
-            if path.is_file() and path.suffix in {".py", ".md", ".txt"}:
+            if path.is_file() and path.suffix in {".py", ".md", ".txt", ".bat"}:
                 target = destination / path.relative_to(ROOT)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copyfile(path, target)

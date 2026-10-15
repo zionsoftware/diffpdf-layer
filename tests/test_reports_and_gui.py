@@ -1,6 +1,7 @@
 import csv
 import io
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -54,23 +55,24 @@ def test_hardlink_overwrite_prohibited(make_pdf, tmp_path):
 
 
 @pytest.mark.parametrize("changed, code", [(False, 0), (True, 1)])
-def test_cli(make_pdf, changed, code):
+def test_cli(make_pdf, runtime_app, changed, code):
     a, b = make_pdf(), make_pdf(text="Changed" if changed else "Base")
-    run = subprocess.run([sys.executable, str(ROOT / "main.py"), "--json", str(a), str(b)], capture_output=True, text=True, encoding="utf-8", timeout=30)
+    run = subprocess.run([sys.executable, str(runtime_app / "main.py"), "--json", str(a), str(b)], capture_output=True, text=True, encoding="utf-8", timeout=30)
     assert run.returncode == code, run.stderr
     assert from_json(run.stdout).status == (Status.DIFFERENT if changed else Status.MATCH)
 
 
-def test_cli_error_exit():
-    run = subprocess.run([sys.executable, str(ROOT / "main.py"), "--json"], capture_output=True, text=True, encoding="utf-8", timeout=30)
+def test_cli_error_exit(runtime_app):
+    run = subprocess.run([sys.executable, str(runtime_app / "main.py"), "--json"], capture_output=True, text=True, encoding="utf-8", timeout=30)
     assert run.returncode == 2
     assert from_json(run.stdout).errors
 
 
 @pytest.fixture
-def gui():
+def gui(runtime_app, monkeypatch):
     import tkinter as tk
     from pdf_layer_compare.gui import Application
+    monkeypatch.setattr("pdf_layer_compare.gui.PROJECT", runtime_app)
     try:
         root = tk.Tk()
     except tk.TclError as exc:
@@ -134,6 +136,7 @@ def test_offline_source_bundle(make_pdf, tmp_path):
     destination = tmp_path / "offline source"
     build = subprocess.run([sys.executable, str(ROOT / "tools" / "prepare_offline.py"), str(destination)], capture_output=True, text=True, encoding="utf-8", timeout=30)
     assert build.returncode == 0, build.stderr
+    assert not (destination / "setup.bat").exists()
     allowed = {".py", ".txt", ".md", ".bat", ".toml", ".typed", ".json", ""}
     assert all(p.suffix in allowed for p in destination.rglob("*") if p.is_file())
     assert list((destination / "vendor").glob("pypdf-LICENSE*"))
@@ -144,15 +147,107 @@ def test_offline_source_bundle(make_pdf, tmp_path):
     assert from_json(run.stdout).status == Status.MATCH
     assert not list(destination.rglob("*.pyc"))
 
-    # Prove setup/start also work with a new, empty venv, no pip or packages.
-    venv = subprocess.run([sys._base_executable, "-m", "venv", "--without-pip", str(destination / ".venv")], capture_output=True, text=True, timeout=30)
-    assert venv.returncode == 0, venv.stderr
-    setup = subprocess.run(["cmd", "/d", "/c", "setup.bat"], cwd=destination, input="\n", capture_output=True, text=True, timeout=30)
-    assert setup.returncode == 0, setup.stderr + setup.stdout
-    assert "No network access" in setup.stdout
-    start = subprocess.run(f'cmd /d /c start.bat --json "{a}" "{a}"', cwd=destination, capture_output=True, text=True, encoding="utf-8", timeout=30)
+    # The installed base interpreter and source files suffice. -S disables
+    # installed site-packages; startup must not create a venv or install anything.
+    env = {**os.environ, "DIFFPDF_PYTHON": sys._base_executable}
+    check = subprocess.run(["cmd", "/d", "/c", "start.bat --check"], cwd=destination, env=env, capture_output=True, text=True, encoding="utf-8", timeout=30)
+    assert check.returncode == 0, check.stderr + check.stdout
+    assert "環境確認 OK" in check.stdout
+    assert sys._base_executable in check.stdout
+    assert not (destination / ".venv").exists()
+    start = subprocess.run(f'cmd /d /c start.bat --json "{a}" "{a}"', cwd=destination, env=env, capture_output=True, text=True, encoding="utf-8", timeout=30)
     assert start.returncode == 0, start.stderr + start.stdout
     assert from_json(start.stdout).status == Status.MATCH
-    failed = subprocess.run('cmd /d /c start.bat --json "missing.pdf" "missing.pdf"', cwd=destination, capture_output=True, text=True, encoding="utf-8", timeout=30)
+    failed = subprocess.run('cmd /d /c start.bat --json "missing.pdf" "missing.pdf"', cwd=destination, env=env, capture_output=True, text=True, encoding="utf-8", timeout=30)
     assert failed.returncode == 2
     assert from_json(failed.stdout).status == Status.UNKNOWN
+
+
+def test_runtime_missing_manual_source(runtime_app, tmp_path):
+    destination = tmp_path / "manual source"
+    shutil.copytree(runtime_app, destination, ignore=shutil.ignore_patterns("vendor"))
+    env = {**os.environ, "DIFFPDF_PYTHON": sys._base_executable}
+    # Even if pypdf exists in the development venv, the manual source copy is
+    # required and the user must receive actionable placement instructions.
+    run = subprocess.run([sys.executable, str(destination / "main.py"), "--json"], capture_output=True, text=True, encoding="utf-8", timeout=30)
+    assert run.returncode == 2
+    report = from_json(run.stdout)
+    assert "フォルダー全体" in report.errors[0]
+    assert str(destination / "vendor" / "pypdf") in report.errors[0]
+    check = subprocess.run(["cmd", "/d", "/c", "start.bat --check"], cwd=destination, env=env, capture_output=True, text=True, encoding="utf-8", timeout=30)
+    assert check.returncode == 2
+    assert "ソースが見つかりません" in check.stderr
+    assert "README.md" in check.stderr
+    assert not (destination / ".venv").exists()
+
+
+def test_runtime_incomplete_manual_source(runtime_app, tmp_path):
+    destination = tmp_path / "incomplete source"
+    shutil.copytree(runtime_app, destination, ignore=shutil.ignore_patterns("vendor"))
+    package = destination / "vendor" / "pypdf"
+    package.mkdir(parents=True)
+    shutil.copyfile(runtime_app / "vendor" / "pypdf" / "__init__.py", package / "__init__.py")
+    run = subprocess.run([sys._base_executable, "-S", str(destination / "main.py"), "--check"], capture_output=True, text=True, encoding="utf-8", timeout=30)
+    assert run.returncode == 2
+    assert "読み込みに失敗" in run.stderr
+    assert "サブフォルダーもすべて必要" in run.stderr
+
+
+def test_runtime_wrong_manual_source_version(runtime_app, tmp_path):
+    destination = tmp_path / "wrong version"
+    shutil.copytree(runtime_app, destination, ignore=shutil.ignore_patterns("vendor"))
+    package = destination / "vendor" / "pypdf"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("__version__ = '0.0.0'\n", encoding="utf-8")
+    run = subprocess.run([sys._base_executable, "-S", str(destination / "main.py"), "--check"], capture_output=True, text=True, encoding="utf-8", timeout=30)
+    assert run.returncode == 2
+    assert "6.20.1" in run.stderr and "0.0.0" in run.stderr
+
+
+def test_start_ignores_project_venv(runtime_app, tmp_path, make_pdf):
+    destination = tmp_path / "with old venv"
+    shutil.copytree(runtime_app, destination)
+    obsolete = destination / ".venv" / "Scripts"
+    obsolete.mkdir(parents=True)
+    (obsolete / "python.exe").write_bytes(b"not an executable")
+    a = make_pdf()
+    run = subprocess.run(f'cmd /d /c start.bat --json "{a}" "{a}"', cwd=destination, env={**os.environ, "DIFFPDF_PYTHON": sys._base_executable}, capture_output=True, text=True, encoding="utf-8", timeout=30)
+    assert run.returncode == 0, run.stderr
+    assert from_json(run.stdout).status == Status.MATCH
+
+
+def test_invalid_python_override_is_reported(runtime_app):
+    run = subprocess.run(["cmd", "/d", "/c", "start.bat --check"], cwd=runtime_app, env={**os.environ, "DIFFPDF_PYTHON": str(runtime_app / "no-python.exe")}, capture_output=True, text=True, encoding="utf-8", timeout=30)
+    assert run.returncode == 2
+    assert "DIFFPDF_PYTHON" in run.stdout
+    assert not (runtime_app / ".venv").exists()
+
+
+def test_gui_on_base_python(runtime_app, make_pdf):
+    code = """
+from pathlib import Path
+import sys, time
+root_path = Path(sys.argv[1])
+sys.dont_write_bytecode = True
+sys.path[:0] = [str(root_path / 'src'), str(root_path / 'vendor')]
+assert sys.prefix == sys.base_prefix
+import tkinter as tk
+from pdf_layer_compare.gui import Application
+from pdf_layer_compare.model import Status
+root = tk.Tk()
+root.withdraw()
+app = Application(root, sys.argv[2:])
+try:
+    app.start()
+    deadline = time.monotonic() + 20
+    while app.process and time.monotonic() < deadline:
+        root.update()
+        time.sleep(0.02)
+    assert app.report is not None, app.detail.get('1.0', 'end')
+    assert app.report.status == Status.MATCH
+finally:
+    app.close()
+"""
+    a = make_pdf()
+    run = subprocess.run([sys._base_executable, "-B", "-S", "-c", code, str(runtime_app), str(a), str(a)], capture_output=True, text=True, encoding="utf-8", timeout=30)
+    assert run.returncode == 0, run.stderr

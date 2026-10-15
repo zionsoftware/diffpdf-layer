@@ -1,4 +1,6 @@
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 from pypdf import PdfWriter
@@ -6,6 +8,15 @@ from pypdf.generic import (
     ArrayObject, BooleanObject, DecodedStreamObject, DictionaryObject,
     FloatObject, NameObject, NumberObject, TextStringObject, PdfObject,
 )
+
+
+@pytest.fixture(scope="session")
+def runtime_app(tmp_path_factory):
+    root = Path(__file__).resolve().parents[1]
+    destination = tmp_path_factory.mktemp("runtime") / "source app"
+    run = subprocess.run([sys.executable, str(root / "tools" / "prepare_offline.py"), str(destination)], capture_output=True, text=True, encoding="utf-8", timeout=30)
+    assert run.returncode == 0, run.stderr
+    return destination
 
 
 def pdf_value(value):

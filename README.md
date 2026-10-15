@@ -9,23 +9,71 @@
 - Windows、Python **3.14.8 (64bit)** + Tcl/Tk。開発機で Tk 9.0 を確認。
 - 実行時の外部依存は **pypdf 6.20.1** のみ。Tkinter は Python 標準の配布物を使用。
 - 開発テスト用: pytest 9.1.1。利用者の PC には不要。
+- 実行にはインストール済みの Python をそのまま使います。venv の作成・参照や pip によるインストールは行いません。
 - 実行時にインターネット、クラウド、外部 API は使いません。EXE 化も不要です。
 - Windows 10 / 11 の両方を使った実機検証は未実施です。
 
-## インターネット接続のある開発 PC
+## オンライン側での準備
 
-Python を公式 Windows インストーラーで導入し、Tcl/Tk を含めてください。
+オンライン側では、ブラウザーで次の 2 つのソース ZIP をダウンロードするだけです。Python、自作プログラム、PowerShell、BAT を実行する必要はありません。
 
-```powershell
-cd C:\dev\diffpdf-layer
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-.\.venv\Scripts\python.exe -m pytest
+1. [このツールの GitHub](https://github.com/zionsoftware/diffpdf-layer) の「Code → Download ZIP」。
+2. [pypdf 6.20.1 の公式リリース](https://github.com/py-pdf/pypdf/releases/tag/6.20.1) の「Source code (zip)」。**最新版ではなく 6.20.1 を選んでください。**
+
+取得した ZIP をオフライン環境へコピーします。ZIP の展開・ソースの配置はオフライン側で手動で行います。
+
+## オフライン環境のセットアップ
+
+Python 3.14.8 (64bit、Tcl/Tk を含む) をインストール済みであることが前提です。Python 本体の導入は別途行ってください。
+
+### pypdf のコピー元と配置先
+
+1. ツールの ZIP を展開します。`main.py`、`start.bat` があるフォルダーがツールのルートです。以下では `C:\dev\diffpdf-layer` を例にします。
+2. pypdf の ZIP を展開します。展開した外側の `pypdf-6.20.1` フォルダーの中に、**内側の `pypdf` フォルダー**と `LICENSE` があります。
+3. ツールのルートに `vendor` フォルダーを作成し、次のとおりコピーします。
+
+| コピー元 (pypdf の ZIP 展開先) | コピー先 (ツールのルートからの相対位置) |
+|---|---|
+| `pypdf-6.20.1\pypdf` フォルダー全体 | `vendor\pypdf` |
+| `pypdf-6.20.1\LICENSE` ファイル | `vendor\pypdf-LICENSE.txt` (コピー時に名前を変更) |
+
+`pypdf` フォルダーは、`.py` ファイルだけを選別せず、サブフォルダーや `py.typed` も含めて丸ごとコピーしてください。外側の `pypdf-6.20.1` を配置したり、`__init__.py` だけをコピーしたりすると動作しません。pypdf のテストやドキュメントをコピーする必要はありません。
+
+配置後は次の構成になります。
+
+```text
+diffpdf-layer/
+├── main.py
+├── start.bat
+├── src/
+├── tools/
+└── vendor/
+    ├── pypdf-LICENSE.txt
+    └── pypdf/
+        ├── __init__.py
+        ├── _reader.py
+        ├── _writer.py
+        ├── generic/
+        └── ... (残りのファイル・サブフォルダーもすべて)
 ```
 
-`python` が Windows Store のエイリアスを指す場合は、インストール済みの Python のフルパス、または `py -3.14` を使用してください。開発機では `C:\Users\zion_ai\AppData\Local\Programs\Python\Python314\python.exe` を使って作成しました。
+### 確認と起動
 
-利用者向けのオンラインセットアップは `setup.bat online` でも実行できます。これは実行時依存のみを導入します。単に `setup.bat` を起動した場合、`vendor/pypdf` がない状態で自動的にネット接続することはありません。
+`start.bat` をダブルクリックしてください。起動時に Python・Tkinter・手動配置した pypdf 6.20.1 を確認し、問題がなければ GUI を表示します。**事前のセットアップ操作は不要です。venv 作成・pip 実行・ネット接続・ZIP の自動展開は行いません。**
+
+pypdf がない場合は、コピーするフォルダーと配置先を表示して終了します。コピー不足や別バージョンの場合も、フォルダー全体の再配置を案内します。システム側に pypdf がインストール済みでも、ツール内の `vendor/pypdf` が必要です。
+
+BAT は `py -3.14`、次に PATH 上の `python` を確認して、仮想環境外の Python 3.14 を使用します。ツールの `.venv` は参照しません。PATH が仮想環境を指していて通常の Python を検出できない場合や、Windows Store のエイリアスを指す場合は、環境変数 `DIFFPDF_PYTHON` にインストール済み `python.exe` のフルパスを指定してください。
+
+例えば、オフライン側のコマンドプロンプトで次のように指定できます。
+
+```bat
+cd /d C:\dev\diffpdf-layer
+set "DIFFPDF_PYTHON=C:\Users\ユーザー名\AppData\Local\Programs\Python\Python314\python.exe"
+start.bat
+```
+
+この `set` は同じコマンドプロンプト内で有効です。ダブルクリック起動でもパスを指定したい場合は、Windows のユーザー環境変数として `DIFFPDF_PYTHON` を設定してください。
 
 ## 起動と操作
 
@@ -43,44 +91,13 @@ GUI の比較は別プロセスで実行します。中止可能で、180 秒経
 
 ### コマンドライン
 
-```powershell
-.\.venv\Scripts\python.exe main.py --cli "工程1.pdf" "工程2.pdf"
-.\.venv\Scripts\python.exe main.py --json --output "結果.json" "工程1.pdf" "工程2.pdf"
+```bat
+start.bat --cli "工程1.pdf" "工程2.pdf"
+start.bat --json --output "結果.json" "工程1.pdf" "工程2.pdf"
+start.bat --check
 ```
 
 終了コードは `0`: 一致、`1`: 不一致、`2`: 検証不能・構成エラーです。CLI / エンジン直接呼び出しには GUI の 180 秒制限はありません。
-
-## オフライン環境のセットアップ
-
-`.venv`、wheel、EXE、DLL を配布フォルダーに含めず、ソースコードのみで導入します。**このリポジトリのソースだけでは pypdf が含まれないため、次のソース配布フォルダーを事前に作成する必要があります。**
-
-### 開発 PC でオフライン環境用のソース一式を準備
-
-```powershell
-.\.venv\Scripts\python.exe tools\prepare_offline.py
-```
-
-新規の `dist/offline-source` に、プログラム・文書・テストのソース、インストール済み pypdf の `.py` ソース、型情報、pypdf のライセンス、SHA-256 一覧を作ります。元ライセンスを保持します。既存出力先は上書きせず停止するため、再作成時は別の出力先を指定できます。
-
-```powershell
-.\.venv\Scripts\python.exe tools\prepare_offline.py dist\offline-source-v2
-```
-
-この処理はダウンロードを行いません。pypdf 6.20.1 が開発 venv にインストール済みであることが前提です。生成物に `.pyc` / `.pyd` / `.dll` / `.exe` / wheel / venv は含めません。SHA-256 一覧は内容確認用で、署名による真正性保証ではありません。
-
-### オフライン環境で導入
-
-1. オフライン環境に Python 3.14.8 (64bit、Tcl/Tk を含む) をインストールします。
-2. 作成した `offline-source` フォルダーをローカルへコピーします。
-3. `vendor/pypdf/__init__.py` と `vendor/pypdf-LICENSE-0.txt` があることを確認します。
-4. `setup.bat` をダブルクリックします。Python から venv を作成し、同梱ソースを確認します。pip やネット接続は不要です。
-5. `start.bat` をダブルクリックします。
-
-Python を PATH に登録せず、`py` ランチャーもない場合は、インストール済み Python のフルパスで `<Pythonの場所>\python.exe -m venv .venv` を先に実行してください。venv 内の実行ファイルは、オフライン環境の Python 本体から生成されます。
-
-起動時に `vendor` のソースをインポートするため、pypdf のビルド用依存パッケージやバイナリは不要です。通常の `pip install pypdf.tar.gz` はビルド用依存の取得を要求する場合があるため、今回の手順では採用していません。暗号化 PDF・JBIG2 等の追加依存を要する形式は対応対象外です。
-
-pytest とその依存ソースは配布フォルダーに同梱していません。オフライン環境で自動テストも実行する場合は、別途それらの純 Python ソースを用意して導入してください。通常の比較実行には不要です。
 
 ## 判定と対応範囲
 
@@ -97,3 +114,11 @@ pytest とその依存ソースは配布フォルダーに同梱していませ�
 ## 構成
 
 `src/pdf_layer_compare` 内で GUI・解析・OCG 検査・注釈・本文・比較・出力を分離しています。`tests` は機密情報を含まない PDF をコードから一時生成します。実際の業務 PDF・出力結果を公開 GitHub に登録しないでください。
+
+## 開発・テスト用の補助機能
+
+以下は開発用です。利用者の導入手順では実行不要です。実行用 BAT が開発用 venv を使用することはありません。
+
+- 自動テストは pypdf 6.20.1 と pytest 9.1.1、および pytest の依存が導入済みの開発環境で `python -m pytest` を実行します。開発用 venv の利用は任意です。開発依存の一覧は `requirements-dev.txt` にあります。
+- `tools/prepare_offline.py` は、pypdf がインストール済みの開発環境でソース一式を複製する補助ツールです。通常の ZIP ダウンロード・手動配置方式には不要です。オンライン側で実行する必要はありません。
+- `vendor`、開発用 `.venv`、生成した `dist` は Git 管理対象外です。GitHub のツール本体の ZIP には pypdf は含まれません。
