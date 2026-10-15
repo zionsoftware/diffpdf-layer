@@ -1,0 +1,34 @@
+"""BAT/CLI entry point; no project installation required."""
+from pathlib import Path
+import sys
+
+sys.dont_write_bytecode = True
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent / "vendor"))
+
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="PDFレイヤー同一性検証ツール")
+    parser.add_argument("files", nargs="*")
+    parser.add_argument("--cli", action="store_true", help="GUI を使わず比較")
+    parser.add_argument("--json", action="store_true", help="JSON を標準出力へ出力")
+    parser.add_argument("--output", help=".txt / .csv / .json 保存先")
+    args = parser.parse_args()
+    if args.cli or args.json:
+        from pdf_layer_compare.comparator import compare_files
+        from pdf_layer_compare.model import Status
+        from pdf_layer_compare.report import save_report, to_json, to_text
+        report = compare_files(args.files)
+        if args.output:
+            save_report(report, args.output)
+        sys.stdout.reconfigure(encoding="utf-8")
+        print(to_json(report) if args.json else to_text(report))
+        return {Status.MATCH: 0, Status.DIFFERENT: 1, Status.UNKNOWN: 2}[report.status]
+    from pdf_layer_compare.gui import launch
+    launch(args.files)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

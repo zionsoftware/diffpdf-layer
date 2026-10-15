@@ -1,25 +1,99 @@
-# diffpdf-layer
-PDFの本体とレイヤーごとの注釈を比較するプログラム
+# PDFレイヤー同一性検証ツール (diffpdf-layer)
 
-## Python 開発環境
+2～4 個の PDF について、ベース本文、同名 OCG レイヤー、合成順序を全組み合わせで比較する Windows 向けの試作品です。任意の日本語・Unicode レイヤー名に対応し、結果を「一致」「不一致」「検証不能」で表示します。
 
-Python 3.14.8 を使用し、プロジェクト直下の `.venv` に仮想環境を作成しています。
-依存パッケージは `requirements.txt` に記録しています。`.venv` は Git の管理対象外です。
+**判定: CONDITIONAL GO。実際の PDF-XChange Editor 出力との互換性は未検証です。業務上の承認を自動で決める製品ではありません。** 未対応構造がある組は、内容が同じように見えても「検証不能」になります。
 
-PowerShell で仮想環境を有効にするには、次を実行します。
+## 動作環境
+
+- Windows、Python **3.14.8 (64bit)** + Tcl/Tk。開発機で Tk 9.0 を確認。
+- 実行時の外部依存は **pypdf 6.20.1** のみ。Tkinter は Python 標準の配布物を使用。
+- 開発テスト用: pytest 9.1.1。利用者の PC には不要。
+- 実行時にインターネット、クラウド、外部 API は使いません。EXE 化も不要です。
+- Windows 10 / 11 の両方を使った実機検証は未実施です。
+
+## インターネット接続のある開発 PC
+
+Python を公式 Windows インストーラーで導入し、Tcl/Tk を含めてください。
 
 ```powershell
 cd C:\dev\diffpdf-layer
-.\.venv\Scripts\Activate.ps1
-python --version
-python -m pip --version
-python -m pip install -r requirements.txt
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pytest
 ```
 
-有効化せずに直接実行することもできます。
+`python` が Windows Store のエイリアスを指す場合は、インストール済みの Python のフルパス、または `py -3.14` を使用してください。開発機では `C:\Users\zion_ai\AppData\Local\Programs\Python\Python314\python.exe` を使って作成しました。
+
+利用者向けのオンラインセットアップは `setup.bat online` でも実行できます。これは実行時依存のみを導入します。単に `setup.bat` を起動した場合、`vendor/pypdf` がない状態で自動的にネット接続することはありません。
+
+## 起動と操作
+
+1. `start.bat` をダブルクリックします。
+2. 「PDF を追加」で 2～4 個指定します。フルパスと入力順を表示します。
+3. 「上へ」「下へ」で工程順を調整し、「比較開始」を押します。
+4. 各組のベース PDF・レイヤー・合成順序の結果を確認します。行の選択で詳細を表示します。
+5. 「結果を保存」でテキスト / CSV / JSON を保存できます。
+
+原本はバイナリ読み取りでメモリーへ読み込み、書き込みません。入力 PDF 本体・別名のハードリンクへの結果上書きも拒否します。結果にはファイル名・パスや注釈文の一部が含まれる場合があるため、PDF と同じ管理区分で保管してください。
+
+ファイルの GUI 内へのドラッグ＆ドロップは未対応です。PDF を `start.bat` にドロップして起動する方法は引数の受け取りに対応していますが、Explorer からのドロップ操作自体は未検証です。バイナリ依存の DnD 拡張は導入していません。
+
+GUI の比較は別プロセスで実行します。中止可能で、180 秒経過時はプロセスを終了し検証不能と表示します。メモリー使用量の OS レベルの強制上限は設けていません。
+
+### コマンドライン
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip list
+.\.venv\Scripts\python.exe main.py --cli "工程1.pdf" "工程2.pdf"
+.\.venv\Scripts\python.exe main.py --json --output "結果.json" "工程1.pdf" "工程2.pdf"
 ```
 
-仮想環境を再作成する場合は、インストール済みの Python で `python -m venv .venv` を実行してください。
+終了コードは `0`: 一致、`1`: 不一致、`2`: 検証不能・構成エラーです。CLI / エンジン直接呼び出しには GUI の 180 秒制限はありません。
+
+## ソースコードだけを持ち込むオフライン PC
+
+`.venv`、wheel、EXE、DLL は持ち込みません。**このリポジトリのソースだけでは pypdf が含まれないため、次のソース配布フォルダーを事前に作成する必要があります。**
+
+### 開発 PC で持込用のソース一式を準備
+
+```powershell
+.\.venv\Scripts\python.exe tools\prepare_offline.py
+```
+
+新規の `dist/offline-source` に、プログラム・文書・テストのソース、インストール済み pypdf の `.py` ソース、型情報、pypdf のライセンス、SHA-256 一覧を作ります。元ライセンスを保持します。既存出力先は上書きせず停止するため、再作成時は別の出力先を指定できます。
+
+```powershell
+.\.venv\Scripts\python.exe tools\prepare_offline.py dist\offline-source-v2
+```
+
+この処理はダウンロードを行いません。pypdf 6.20.1 が開発 venv にインストール済みであることが前提です。生成物に `.pyc` / `.pyd` / `.dll` / `.exe` / wheel / venv は含めません。pypdf のソースも会社の持込手続きで審査してください。SHA-256 一覧は内容確認用で、署名による真正性保証ではありません。
+
+### オフライン PC で導入
+
+1. 会社で承認された Python 3.14.8 (64bit、Tcl/Tk を含む) をインストールします。
+2. 承認された `offline-source` フォルダーをローカルへコピーします。
+3. `vendor/pypdf/__init__.py` と `vendor/pypdf-LICENSE-0.txt` があることを確認します。
+4. `setup.bat` をダブルクリックします。Python から venv を作成し、同梱ソースを確認します。pip やネット接続は不要です。
+5. `start.bat` をダブルクリックします。
+
+Python を PATH に登録せず、`py` ランチャーもない場合は、管理された Python のフルパスで `<Pythonの場所>\python.exe -m venv .venv` を先に実行してください。Python 本体がオフライン PC 上で生成する venv 内の実行ファイルは、配布フォルダーから持ち込むものではありません。
+
+起動時に `vendor` のソースをインポートするため、pypdf のビルド用依存パッケージやバイナリは不要です。通常の `pip install pypdf.tar.gz` はビルド用依存の取得を要求する場合があるため、今回の手順では採用していません。暗号化 PDF・JBIG2 等の追加依存を要する形式は対応対象外です。
+
+pytest とその依存ソースは配布フォルダーに同梱していません。オフライン PC で自動テストも実行する場合は、別途それらの純 Python ソースの承認・導入が必要です。通常の比較実行には不要です。
+
+## 判定と対応範囲
+
+- 全ファイルのレイヤー名の集合を先に検査します。重複名・不正参照・不足名はファイル名と理由を表示し、内容比較へ進みません。
+- 比較できた範囲で値が同じなら一致、違えば不一致です。未対応構造・解析警告・例外があるファイルを含む組は全項目を検証不能にします。他の正常ファイル同士の組は比較を続けます。
+- レイヤーの差異があっても、他レイヤー・全組の比較は続行します。「不一致」を業務上の不合格と解釈するかは利用者の判断です。
+- ページ数・ページ属性・本文の命令列と使用リソースを比較します。レイヤー内容の平坦化は本文命令の変化として検出します。ただし、レイヤー外本文の追加者や作成履歴は判別できません。
+- オブジェクト番号・辞書キー順・ロスレス圧縮・注釈の保存日時 / NM は正規化します。文字、座標、色等を許容誤差で同一視しません。
+- `合成順序` は本文・レイヤー描画・レイヤー間注釈の重なり順を検査する補助項目です。
+- 見た目が同じでも命令列・リソース構成が異なれば不一致になる場合があります。画素一致・PDF 仕様全体の意味的同一性を保証するものではありません。
+
+詳細: [対応・未対応構造](docs/supported-structures.md)、[技術調査](docs/technical-investigation.md)、[開発結果報告](docs/development-report.md)。
+
+## 構成
+
+`src/pdf_layer_compare` 内で GUI・解析・OCG 検査・注釈・本文・比較・出力を分離しています。`tests` は機密情報を含まない PDF をコードから一時生成します。実際の業務 PDF・出力結果を公開 GitHub に登録しないでください。
