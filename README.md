@@ -33,10 +33,13 @@ setup.batはありません。配置元・配置先、Pythonの指定、環境�
 | [基本設計書](docs/basic-design.md) | 構成・画面・処理方式・基本フロー |
 | [詳細設計書](docs/detailed-design.md) | 実際のモジュール・関数・データ・安全設計 |
 | [テスト仕様書・検証結果](docs/test-specification.md) | 要件との対応・自動テスト・実機検証・未検証事項 |
-| [ユーザーマニュアル](docs/user-manual.md) | 操作方法・判定の読み方・保存・FAQ |
+| [ユーザーマニュアル Markdown版](docs/user-manual.md) | 実画面付きの操作方法・判定の読み方・保存・FAQ。正式原稿 |
+| [ユーザーマニュアル Word版](docs/user-manual.docx) | 画像を内包した単一ファイル。オフラインで本文・図・表を閲覧可能 |
 | [インストール・セットアップ手順書](docs/installation-guide.md) | オフライン準備・手動vendor配置・起動・更新 |
 
 [文書一覧・参照案内](docs/README.md)から、既存の技術調査・対応構造一覧・開発報告・実機検証記録へも進めます。開発用テストの再実行方法はテスト仕様書に記載しています。
+
+Word版はMarkdown原稿とPNGから生成します。[再生成方法](docs/user-manual-build.md)を参照してください。文書生成用ライブラリは本体の実行環境には不要です。
 
 ## 対応範囲の注意事項
 

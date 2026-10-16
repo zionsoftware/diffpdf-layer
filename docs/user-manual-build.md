@@ -1,0 +1,86 @@
+# ユーザーマニュアルの再生成と検証
+
+対象: diffpdf-layer 0.1.0。更新日: 2026-10-16。
+
+## 1. 原稿と配布物
+
+[user-manual.md](user-manual.md)を正式な原稿とし、[user-manual.docx](user-manual.docx)はそこから生成する配布物とする。文章・図番号・キャプションはMarkdownを修正し、Wordだけを直接編集しない。DOCXは8枚のPNGを内包し、画像フォルダーを一緒に渡さなくても、オフラインで本文・図・表を閲覧できる。
+
+表紙には原稿の対象バージョン・更新日を使用する。本文はA4縦、メイリオ10.5ポイントを基本とし、Wordの見出しスタイル、章へのリンク付き目次、ページ番号を生成する。目次は静的な章リンクなので、開いた直後から使え、フィールド更新は不要。WordではCtrlを押しながら目次項目をクリックできる。ページ番号はPAGEフィールドである。
+
+別資料へのMarkdown相対リンクは、WordではGitHub上の対応資料への補足リンクに変換する。操作に必要な説明・画像・表はWord内に保持しており、リンクを開かずに利用できる。GitHubの補足資料を開く場合だけ通信が必要となる。
+
+## 2. 文書生成専用の依存関係
+
+生成にはPythonと[tools/requirements-docs.txt](../tools/requirements-docs.txt)のpython-docx 1.2.0を使用する。この依存は**文書を作る開発環境だけ**に必要であり、本体のrequirements.txtや利用者のオフライン実行環境には追加しない。
+
+例えば、文書作成用の開発環境を別に用意する場合は、リポジトリのルートで次を実行する。pipによる取得は文書作成が可能な開発環境で行うもので、オンライン側でZIPを取得するだけの利用者向け手順ではない。
+
+```bat
+py -3.14 -m venv .venv-docs
+.venv-docs\Scripts\python.exe -m pip install -r tools\requirements-docs.txt
+.venv-docs\Scripts\python.exe tools\build_user_manual.py
+```
+
+既にpython-docxが使える文書作成用Pythonがあれば、そのPythonで直接スクリプトを実行してよい。本体用のvenvやpypdfを文書生成ツールが作成・参照することはない。
+
+## 3. 生成と検査
+
+標準の入力はdocs/user-manual.md、出力はdocs/user-manual.docx。リポジトリのルートから実行する。
+
+```bat
+python tools\build_user_manual.py
+python tools\build_user_manual.py --check
+```
+
+別の作業用出力先を指定する場合は次のようにする。
+
+```bat
+python tools\build_user_manual.py --source docs\user-manual.md --output output\manual-review\user-manual.docx
+```
+
+スクリプトは見出し、段落、2列等の表、番号/箇条書き、コードブロック、強調、インラインコード、リンク、相対パスのPNGを処理する。現在のマニュアルで使用するMarkdown構文を対象とする小規模な変換器であり、任意のHTML・複雑な入れ子リスト・任意のMarkdown拡張に対応する汎用コンバーターではない。未対応ブロック、表の列数不一致、閉じていないコード等はエラーとし、生成後の本文照合でも脱落を検出する。
+
+生成後および--checkで、次を機械検査する。
+
+- Markdownから抽出した本文・見出し・表セル・リスト・コードと、DOCX本文の順序付き一致。
+- 原稿SHA256とDOCXの識別情報の一致。改行をLFへ統一して照合し、Gitの改行変換だけは変更と見なさない。原稿の内容だけ更新されていれば再生成を要求する。
+- PNGの埋め込み件数、元PNGと埋め込みバイトのSHA256一致、外部リンク画像がないこと。
+- 画像の縦横比、A4縦、章の見出し数と目次リンク先、ページ番号フィールド。
+
+機械検査だけでは、実際の改ページ、表のはみ出し、文字の読みやすさ、ビューアー固有の差を保証できない。生成後はWord等で全ページを表示確認する。レイアウト修正は原稿または生成ツールへ反映し、再生成・再表示する。確認用PDFやページPNGは作業用領域に置き、配布物・Gitへ追加しない。
+
+## 4. 実画面の撮影と差し替え
+
+撮影はWindows 11、Python 3.14.8、pypdf 6.20.1、未変更のGUIソースで実施した。Computer Useで操作した実画面を取得し、必要な範囲を切り抜いてPNG化した。文字・判定・UI部品の描き足し、模擬画面への差し替えはしていない。
+
+サンプルは自動テストのmake_pdfと同じ自作データ生成方法で作成した。reference.pdfを基準とし、checked-a.pdfでは担当者レイヤーの注釈文字を変更、checked-b.pdfでは同じ注釈のフォントと/Tを変更した。作成者名は説明用のuserA/userBのみである。サンプルPDF・TXT保存結果・元キャプチャはGit管理外のoutput/manual-captureに置き、公開しない。
+
+| 図 | PNG | 撮影内容 |
+|---|---|---|
+| 1 | [main-window.png](images/user-manual/main-window.png) | 起動直後の画面全体 |
+| 2 | [pdf-selection.png](images/user-manual/pdf-selection.png) | 3ファイルの入力順・基準表示・順序変更ボタン |
+| 3 | [comparison-results.png](images/user-manual/comparison-results.png) | 実際の8行の比較結果と結果保存ボタン |
+| 4 | [comparison-results-zoom.png](images/user-manual/comparison-results-zoom.png) | 図3の対象・判定列の部分拡大 |
+| 5 | [result-details.png](images/user-manual/result-details.png) | 選択行のフォント変更・双方の作成者情報 |
+| 6 | [author-details.png](images/user-manual/author-details.png) | 図5の名前別件数・構成変更の部分拡大 |
+| 7 | [save-results.png](images/user-manual/save-results.png) | 実際の保存ダイアログのファイル名・種類・保存ボタン |
+| 8 | [save-formats.png](images/user-manual/save-formats.png) | TXT・CSV・JSONの選択肢を開いた状態の部分拡大 |
+
+撮影例の8行は、各比較対象についてPDF本体・レイヤーなし・担当者・確認者の4行である。checked-aの担当者のみ不一致、checked-bの担当者のみ一致（フォントのみ変更）、他は一致。checked-bの担当者はuserA:1件→userB:1件で構成変更ありとなった。TXTもGUIから実際に保存した。
+
+今後の差し替えでも、個人情報のない自作PDFと作業用フォルダーを使い、実画面を撮影する。全体画面と部分拡大の対応を確認し、画像の文言とキャプションを照合する。PNGに対して許容する加工は範囲の切り抜きと形式変換で、内容の書き換えはしない。画面取得に失敗した場合は架空画像で補わず、取得できた範囲と不足を記録する。
+
+## 5. 今回の検証記録
+
+原稿から137本文単位、12章、目次リンク12件、PNG8枚を照合した。元PNGと埋め込み画像のバイトは一致し、外部リンク画像は0件。6判定・作成者情報・起動準備・原本保護の説明を保持した。
+
+文書生成・照合には開発用Python 3.12.14とpython-docx 1.2.0を使用した。本体の撮影用実行環境とは別であり、本体の必要バージョンを変更するものではない。複数行コード、見出し、箇条書き、表、リンクの変換、原稿の未反映・不正構文の拒否も作業用原稿で確認した。
+
+LibreOffice Writer 26.2.6.3（Windows）でDOCXを開き、**全13ページ**を確認した。目次から「結果一覧を読む」の章へ移動できることも実操作で確認した。Writerから確認用PDFへ出力し、全13ページをPNG化して等倍で目視確認した。表紙、目次、見出し、ページ番号、日本語、表、8枚の図とキャプションに、欠落・はみ出し・不自然な画像分割・空白ページはなかった。Microsoft Wordでの表示と、別PCでの表示は未検証。ビューアーやフォント環境によって改ページは変わり得る。
+
+DOCX単体の作業用コピーを作成し、画像の参照先がすべて文書内部であることを検査した。本文137単位・12章とMarkdownの対応、目次リンク12件、画像8枚のバイト一致、外部リンク画像0件、A4縦、画像の縦横比、ページ番号フィールドを確認した。PNG全8枚について、自作サンプルの表示だけであること、個人情報・私有資料が写っていないことを確認した。
+
+撮影用GUIで3ファイルを比較し、想定した8行の判定・作成者構成変更を確認し、TXTを保存した。本体を変更していないため、大規模な回帰テストの再実行は行っていない。文書のリンクとMarkdown構文を検査し、不備はなかった。
+
+作業開始時に記録した既存66ファイル（既存PDF38個を含む）と、撮影用の自作PDF3個は、作業後もSHA256が不変だった。比較エンジン・GUI・CLI・起動処理・既存テストには変更を加えていない。サンプルPDF、私有PDF、確認用PDF・ページ画像はコミット対象に含めない。
