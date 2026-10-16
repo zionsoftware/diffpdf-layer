@@ -261,7 +261,7 @@ def build(source, output):
     section.top_margin = section.bottom_margin = Mm(20)
     section.left_margin = section.right_margin = Mm(22)
     section.header_distance = section.footer_distance = Mm(10)
-    section.different_first_page_header_footer = True
+    section.different_first_page_header_footer = False
     for name, size, bold in [("Normal",10.5,False),("Title",24,False),("Subtitle",18,False),("Heading 1",16,True),("Heading 2",12,True),("Heading 3",11,True),("Caption",9,False),("List Number",10.5,False),("List Bullet",10.5,False)]:
         font_style(doc.styles[name],size,bold)
     normal=doc.styles["Normal"].paragraph_format
@@ -270,6 +270,7 @@ def build(source, output):
         p=doc.styles[name].paragraph_format
         p.keep_with_next=True; p.keep_together=True; p.space_before=Pt(12); p.space_after=Pt(6)
     footer=section.footer.paragraphs[0];footer.alignment=WD_ALIGN_PARAGRAPH.CENTER
+    footer.add_run("ページ ")
     field=element("w:fldSimple",instr="PAGE")
     run=OxmlElement("w:r"); t=OxmlElement("w:t");t.text="1";run.append(t);field.append(run);footer._p.append(field)
     doc.settings.element.append(element("w:updateFields",val="false"))
@@ -376,8 +377,18 @@ def check(source,output):
         anchors={a.get(qn("w:name")) for a in xml.findall(".//w:bookmarkStart",NS)}
         toc=[a.get(qn("w:anchor")) for a in xml.findall(".//w:hyperlink",NS) if a.get(qn("w:anchor"))]
         if len(toc)!=chapter_count or not set(toc)<=anchors: raise ValueError("目次リンクが不正です")
-        if not any(b"PAGE" in z.read(name) for name in z.namelist() if re.fullmatch(r"word/footer\d+\.xml",name)):
-            raise ValueError("ページ番号がありません")
+        section=xml.find(".//w:sectPr",NS)
+        if section.find("w:titlePg",NS) is not None:
+            raise ValueError("表紙にもページ番号を表示してください")
+        footer_ref=section.find('w:footerReference[@w:type="default"]',NS)
+        footer_target=next((r.get("Target") for r in rels if footer_ref is not None and r.get("Id")==footer_ref.get(qn("r:id"))),None)
+        if not footer_target:
+            raise ValueError("全ページ共通のフッターがありません")
+        footer=ET.fromstring(z.read("word/"+footer_target))
+        page_field=footer.find('.//w:fldSimple[@w:instr="PAGE"]',NS)
+        alignment=footer.find('.//w:pPr/w:jc',NS)
+        if page_field is None or alignment is None or alignment.get(qn("w:val"))!="center" or "ページ " not in "".join(footer.itertext()):
+            raise ValueError("下中央のページ番号がありません")
         core=ET.fromstring(z.read("docProps/core.xml"))
         identifier=core.find("{http://purl.org/dc/elements/1.1/}identifier")
         if identifier is None or identifier.text!="sha256:"+source_digest(source):
