@@ -34,6 +34,26 @@ def test_native_unchanged_save(before, after):
     assert statuses(compare_files(samples(before, after))) == {Status.MATCH}
 
 
+def test_native_save_as_preserves_existing_layers_and_annotation_appearances():
+    # These are unmodified Editor files from the recorded 2026-10-16 session,
+    # not pypdf rewrites. The private fixtures are deliberately not committed.
+    folder = "phase-20261016-175704"
+    paths = samples(f"{folder}/a-input.pdf", f"{folder}/a-resaved.pdf")
+    before = [sha256(p.read_bytes()).digest() for p in paths]
+    report = compare_files(paths)
+    assert statuses(report) == {Status.MATCH}
+    assert {r.component for r in report.results} == {BODY, UNLAYERED, layer_key("検証者A"), layer_key("検証者B")}
+    for row in report.results:
+        if row.component != BODY:
+            assert row.reference_authors.complete and row.target_authors.complete
+            assert row.reference_authors == row.target_authors
+            assert row.authors_changed is False
+    layer = result(report, layer_key("検証者A")).reference_authors
+    assert sum(layer.counts.values()) == 3 and layer.unset_count == 0
+    assert result(report, UNLAYERED).reference_authors.unset_count == 16
+    assert [sha256(p.read_bytes()).digest() for p in paths] == before
+
+
 def test_unmodified_native_demo_and_japanese_edit_are_independent():
     paths = samples("one-annotations-a.pdf", "one-annotations-b.pdf")
     hashes = [sha256(p.read_bytes()).digest() for p in paths]

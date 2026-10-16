@@ -10,6 +10,8 @@
 
 評価版の DEMO 描画や一般的な URI Link 注釈は「レイヤーなし」で比較します。DEMO を無視する処理や URI の実行は行いません。スタンプの追加で無関係なレイヤーが不一致になることはありません。検証条件と結果は [実機検証記録](docs/xchange-validation.md) を参照してください。
 
+未実施のEditor操作を再開する場合は [手動検証手順](docs/xchange-manual-validation.md) に、ケースごとの操作・期待値・保存方法を記載しています。
+
 ## 動作環境
 
 - Windows、Python **3.14.8 (64bit)** + Tcl/Tk。開発機で Tk 9.0 を確認。
