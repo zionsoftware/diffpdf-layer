@@ -211,7 +211,7 @@ def test_unused_acroform_fonts_do_not_pollute_annotations(make_pdf):
     assert statuses(compare_files([a, b])) == {Status.MATCH}
 
 
-def test_annotation_multiset_and_order_are_separate(make_pdf):
+def test_nonoverlapping_annotation_multiset_preserves_counts(make_pdf):
     specs = [{"/Contents": "A", "/Rect": [0, 0, 10, 10]}, {"/Contents": "B", "/Rect": [50, 50, 60, 60]}]
     a = make_pdf(annotations=specs)
     b = make_pdf(annotations=list(reversed(specs)))
@@ -237,7 +237,7 @@ def test_report_has_no_overall_judgment_and_roundtrips_fonts(make_pdf):
     before = sha256(a.read_bytes()).digest(), sha256(b.read_bytes()).digest()
     report = compare_files([a, b])
     data = json.loads(to_json(report))
-    assert data["schema_version"] == 2 and data["reference"] == str(a)
+    assert data["schema_version"] == 3 and data["reference"] == str(a)
     assert "status" not in data and not hasattr(report, "status")
     assert from_json(to_json(report)) == report
     assert "総合" not in to_text(report) + to_csv(report)

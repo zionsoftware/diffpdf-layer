@@ -128,14 +128,15 @@ def test_layer_annotation_order(make_pdf):
     a = make_pdf(annotations=[{"/Contents": "A"}, {"/Contents": "B"}])
     b = make_pdf(annotations=[{"/Contents": "B"}, {"/Contents": "A"}])
     assert result(compare_files([a, b]), "レイヤー: 担当者").status == Status.MATCH
-    assert result(compare_files([a, b]), "合成順序").status == Status.DIFFERENT
+    assert all(row.component != "合成順序" for row in compare_files([a, b]).results)
 
 
 def test_cross_layer_annotation_order(make_pdf):
     a = make_pdf(annotations=[{"/Contents": "A"}, {"/Contents": "B", "owner": 1}])
     b = make_pdf(annotations=[{"/Contents": "B", "owner": 1}, {"/Contents": "A"}])
     report = compare_files([a, b])
-    assert result(report, "合成順序").status == Status.DIFFERENT
+    assert statuses(report) == {Status.MATCH}
+    assert all(row.component != "合成順序" for row in report.results)
 
 
 def test_no_ocg_base_only(make_pdf):

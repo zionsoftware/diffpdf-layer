@@ -136,6 +136,8 @@ class DrawingAnalyzer:
             return {"op:" + op: self.operation_state_value(args, op, resources)}
         if op == '"':
             return {"op:Tw": self.scalar(args[0]), "op:Tc": self.scalar(args[1])}
+        if op == "TD":
+            return {"op:TL": self.scalar([-args[1]])}
         return {}
 
     def operation_state_value(self, args, op, resources):
@@ -277,13 +279,40 @@ class DrawingAnalyzer:
             # save/restore. Keep its entire ordered stream together so its
             # initial clipping path and all later drawing retain dependencies.
             ops = [([], b"q"), *content_operations(obj, self.reader), ([], b"Q")]
-            children, _, _ = DrawingAnalyzer(self.reader, self.ocg, self.font, self.font_size,
+            children, _ = DrawingAnalyzer(self.reader, self.ocg, self.font, self.font_size,
                                              (self.fill_space, self.stroke_space), self.render_mode, self.word_space).partition(ops, resources, allow_layers=False)
             return combine("Form", [self.scalar(attrs), combine("content", children[None])])
         finally:
             FORM_STACK.reset(token)
 
-    def partition(self, ops, resources, allow_layers=True):
+    def independent_children(self, unit, resources, state, inherited):
+        """Split a simple saved interval into complete paths/text/Do units.
+
+        Clipping and nested marked content remain an ordered compound object.
+        Form/AP callers disable this page-only normalization entirely.
+        """
+        inner = unit
+        if inner[0][1] == "q" and inner[-1][1] == "Q":
+            inner = inner[1:-1]
+        if len(inner) >= 2 and inner[0][1] == "BDC" and inner[0][0][0] == "/OC" and inner[-1][1] == "EMC":
+            inner = inner[1:-1]
+        if inner and inner[0][1] == "q" and inner[-1][1] == "Q":
+            inner = inner[1:-1]
+        if not inner or state[4] >= 4:
+            return None
+        if any(op in {"q", "Q", "BDC", "BMC", "EMC", "W", "W*"} or op == "Tr" and args[0] >= 4 for args, op in inner):
+            return None
+        # The caller already validated the complete interval, including owner.
+        # An OC on a nested XObject requires the original ordered path instead.
+        if any(op == "Do" and "/OC" in dictionary(self.resource(resources, "/XObject", args[0])) for args, op in inner):
+            return None
+        child = DrawingAnalyzer(self.reader, self.ocg)
+        child.restore_state(state)
+        groups, _ = child.partition([(args, op.encode("ascii")) for args, op in inner], resources,
+                                    allow_layers=False, initial_inherited=inherited)
+        return groups[None] if len(groups[None]) > 1 else None
+
+    def partition(self, ops, resources, allow_layers=True, initial_inherited=None):
         # First find top-level balanced units. Only q...Q or BDC q...Q EMC
         # blocks may be removed from the base. Other layer content is unknown.
         units, current, qdepth, mcdepth, text, path = [], [], 0, 0, False, False
@@ -326,7 +355,7 @@ class DrawingAnalyzer:
 
         groups = {n: [] for n in (None, *self.ocg.names)}
         errors = {n: [] for n in groups}
-        composition, inherited = [], {}
+        inherited = dict(initial_inherited or {})
         for unit in units:
             isolated = (unit[0][1] == "q" and unit[-1][1] == "Q") or (len(unit) >= 4 and unit[0][1] == "BDC" and unit[1][1] == "q" and unit[-2][1] == "Q" and unit[-1][1] == "EMC")
             affected = set(groups)
@@ -347,6 +376,11 @@ class DrawingAnalyzer:
                 normalized = []
                 overridden, override_stack, needed = set(), [], set()
                 for args, op in unit:
+                    # T* consumes leading immediately, before a later TL can
+                    # overwrite it. Capturing dependencies only at text-show
+                    # would lose the inherited line displacement in that case.
+                    if op == "T*" and "op:TL" in inherited and "op:TL" not in overridden:
+                        needed.add("op:TL")
                     if op == "q":
                         override_stack.append(set(overridden))
                     elif op == "Q":
@@ -383,10 +417,12 @@ class DrawingAnalyzer:
                     # prior q/Q drawings (including DEMO) cannot leak into it.
                     # Tf is carried at each text-show operation with its size;
                     # it must never taint a group that does not use that font.
-                    prefix = [combine(key, [inherited[key]]) for key in sorted(needed)]
-                    groups[owner].append(combine("drawing", [combine("inherited", prefix), combine("ops", normalized)]))
-                    if not composition or composition[-1] != owner:
-                        composition.append(owner)
+                    children = self.independent_children(unit, resources, old_state, inherited) if isolated and allow_layers else None
+                    if children is not None:
+                        groups[owner].extend(children)
+                    else:
+                        prefix = [combine(key, [inherited[key]]) for key in sorted(needed)]
+                        groups[owner].append(combine("drawing", [combine("inherited", prefix), combine("ops", normalized)]))
                 if not isolated:
                     for args, op in unit:
                         for key, value in self.state_updates(args, op, resources).items():
@@ -404,7 +440,7 @@ class DrawingAnalyzer:
                 if isolated:
                     self.restore_state(old_state)
                     self.font_stack = old_stack
-        return groups, errors, composition
+        return groups, errors
 
     def unit_owners(self, unit, resources):
         stack, owners = [], set()

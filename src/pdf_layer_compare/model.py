@@ -47,11 +47,26 @@ class Group:
 
 BODY = "PDF本体"
 UNLAYERED = "レイヤーなし"
-COMPOSITION = "合成順序"
 
 
 def layer_key(name):
     return f"レイヤー: {name}"
+
+
+@dataclass
+class AuthorInfo:
+    """Annotation /T record values, never authenticated user identities."""
+    counts: dict[str, int] = field(default_factory=dict)
+    unset_count: int = 0
+    unreadable_count: int = 0
+    complete: bool = True
+    group_present: bool | None = True
+    errors: list[str] = field(default_factory=list)
+
+    def incomplete(self, reason):
+        self.complete = False
+        if reason not in self.errors:
+            self.errors.append(reason)
 
 
 @dataclass
@@ -61,6 +76,7 @@ class Snapshot:
     ocg: object = None
     groups: dict[str, Group] = field(default_factory=dict)
     file_error: str = ""
+    authors: dict[str, AuthorInfo] = field(default_factory=dict)
 
 
 @dataclass
@@ -71,6 +87,9 @@ class Result:
     status: Status
     detail: str = ""
     font_changes: list[dict] = field(default_factory=list)
+    reference_authors: AuthorInfo | None = None
+    target_authors: AuthorInfo | None = None
+    authors_changed: bool | None = None
 
 
 @dataclass

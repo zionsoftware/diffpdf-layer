@@ -8,8 +8,9 @@ from pypdf import PdfReader
 from pypdf.generic import DictionaryObject, IndirectObject, StreamObject
 
 from .annotation_analyzer import analyze_annotations
+from .authors import collect_authors, initialize_authors
 from .base_analyzer import DrawingAnalyzer, page_attributes, validate_resource
-from .model import BODY, COMPOSITION, UNLAYERED, Content, Group, Snapshot, Unsupported, combine, layer_key
+from .model import BODY, UNLAYERED, Content, Group, Snapshot, Unsupported, combine, layer_key
 from .normalize import Canonicalizer, array, check_numeric_precision, content_operations, dictionary, resolve, stream_data
 from .ocg_analyzer import OCGAnalyzer
 
@@ -84,7 +85,8 @@ def open_document(path):
 
 def analyze_document(snapshot, reader):
     ocg = snapshot.ocg
-    snapshot.groups = {key: Group() for key in (BODY, UNLAYERED, COMPOSITION, *(layer_key(n) for n in snapshot.names))}
+    snapshot.groups = {key: Group() for key in (BODY, UNLAYERED, *(layer_key(n) for n in snapshot.names))}
+    initialize_authors(snapshot)
     groups = snapshot.groups
 
     def fail(keys, error):
@@ -135,34 +137,28 @@ def analyze_document(snapshot, reader):
                 try:
                     resources = dictionary(page.get("/Resources", DictionaryObject()), "ページ Resources")
                     ops = content_operations(page.raw_get("/Contents"), reader) if "/Contents" in page else []
-                    drawings, errors, order = DrawingAnalyzer(reader, ocg).partition(ops, resources)
+                    drawings, errors = DrawingAnalyzer(reader, ocg).partition(ops, resources)
                     for name, values in drawings.items():
                         if values:
-                            groups[key_for(name)].values.append(combine((index, "drawings"), values))
+                            # Sort complete, state-bound drawing objects, never
+                            # the commands inside an object. Keep multiplicity.
+                            groups[key_for(name)].values.append(combine((index, "drawings"), values, unordered=True))
                         if errors[name]:
                             fail([key_for(name)], f"ページ {index}: " + "\n".join(errors[name]))
-                    if order:
-                        value = (index, tuple(order))
-                        groups[COMPOSITION].values.append(Content(value, value))
-                    if any(errors.values()):
-                        fail([COMPOSITION], f"ページ {index}: 描画順序の一部を解析できません")
                 except Exception as exc:
-                    fail([*drawing_keys, COMPOSITION], f"ページ {index} 本文: {exc}")
+                    fail(drawing_keys, f"ページ {index} 本文: {exc}")
                 try:
-                    annotations, errors, order, order_errors = analyze_annotations(page, reader, ocg, form_error)
+                    annotations, errors = analyze_annotations(page, reader, ocg, form_error)
                     for name, values in annotations.items():
                         if values:
                             groups[key_for(name)].values.append(combine((index, "annotations"), values, unordered=True))
                         if errors[name]:
                             fail([key_for(name)], f"ページ {index}: " + "\n".join(errors[name]))
-                    if order.exact[1]:
-                        groups[COMPOSITION].values.append(combine(index, [order]))
-                    if order_errors:
-                        fail([COMPOSITION], f"ページ {index}: " + "\n".join(order_errors))
                 except Exception as exc:
-                    fail([*drawing_keys, COMPOSITION], f"ページ {index} 注釈一覧: {exc}")
+                    fail(drawing_keys, f"ページ {index} 注釈一覧: {exc}")
             if messages:
                 raise Unsupported("PDF 解析警告: " + " / ".join(messages))
     except Exception as exc:
         fail(groups, f"{type(exc).__name__}: {exc}")
+    collect_authors(snapshot, reader, parser_messages)
     return snapshot

@@ -1,4 +1,4 @@
-"""Compare annotation multisets, with separate overlapping-paint order."""
+"""Compare annotation content independently of storage order and /T metadata."""
 import re
 import xml.etree.ElementTree as ET
 
@@ -116,7 +116,7 @@ def annotation_content(annot, page, reader, ocg):
         if not isinstance(resolve(action.get("/URI")), (TextStringObject, ByteStringObject)):
             raise Unsupported("URI 文字列が不正")
     normal = Canonicalizer(ocg)
-    data = DictionaryObject({k: v for k, v in annot.items() if k not in VOLATILE | {"/P", "/OC", "/AP", "/DA", "/RC", "/DS"}})
+    data = DictionaryObject({k: v for k, v in annot.items() if k not in VOLATILE | {"/T", "/P", "/OC", "/AP", "/DA", "/RC", "/DS"}})
     validate_resource(data, reader, ocg)
     value = normal.value(data)
     values = [Content(value, value)]
@@ -136,7 +136,6 @@ def annotation_content(annot, page, reader, ocg):
 def analyze_annotations(page, reader, ocg, form_error=""):
     groups = {n: [] for n in (None, *ocg.names)}
     errors = {n: [] for n in groups}
-    ordered = []
     for index, ref in enumerate(array(page.get("/Annots", ArrayObject()), "Annots"), 1):
         affected = set(groups)
         try:
@@ -147,20 +146,7 @@ def analyze_annotations(page, reader, ocg, form_error=""):
                 raise Unsupported(form_error)
             value = annotation_content(annot, page, reader, ocg)
             groups[owner].append(value)
-            rect = tuple(float(v) for v in annot["/Rect"])
-            ordered.append((owner, rect, value))
         except Exception as exc:
             for name in affected:
                 errors[name].append(f"注釈 {index}: {exc}")
-    # Storage order alone is irrelevant; order of intersecting annotations can
-    # change painting. Compare that separately, including duplicate counts.
-    overlap = []
-    if len(ordered) > 2000:
-        order_errors = ["注釈の重なり検査上限 (2000) 超過"]
-    else:
-        order_errors = [e for values in errors.values() for e in values]
-        for i, (owner, a, value) in enumerate(ordered):
-            for other, b, next_value in ordered[i+1:]:
-                if max(min(a[0], a[2]), min(b[0], b[2])) < min(max(a[0], a[2]), max(b[0], b[2])) and max(min(a[1], a[3]), min(b[1], b[3])) < min(max(a[1], a[3]), max(b[1], b[3])):
-                    overlap.append(combine((owner, other), [value, next_value]))
-    return groups, errors, combine("overlap-order", overlap, unordered=True), order_errors
+    return groups, errors

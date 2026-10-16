@@ -8,7 +8,7 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 from .model import Status
-from .report import from_json, save_report
+from .report import from_json, row_details, save_report
 
 PROJECT = Path(__file__).resolve().parents[2]
 TIMEOUT = 180
@@ -202,7 +202,7 @@ class Application:
             left = f"{report.files.index(row.left) + 1}. {Path(row.left).name}"
             right = f"{report.files.index(row.right) + 1}. {Path(row.right).name}"
             self.tree.insert("", "end", iid=str(index), values=(left, right, row.component, row.status), tags=(row.status,))
-        self.set_detail("\n\n".join(report.errors) if report.errors else "結果行を選択すると、入力ファイルのフルパスと最初の差異を表示します。")
+        self.set_detail("\n\n".join(report.errors) if report.errors else "結果行を選択すると、内容判定・差異と注釈の作成者名（PDF記録値）・件数を表示します。")
         self.save_button.configure(state="normal")
 
     def show_detail(self, event=None):
@@ -210,7 +210,7 @@ class Application:
         if not selected or not self.report:
             return
         row = self.report.results[int(selected[0])]
-        self.set_detail(f"基準: {row.left}\n比較: {row.right}\n対象: {row.component}\n判定: {row.status}\n\n{row.detail or '対応範囲内で同一です。'}")
+        self.set_detail(row_details(row))
 
     def cancel(self):
         if self.process:

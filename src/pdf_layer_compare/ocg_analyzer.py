@@ -11,6 +11,7 @@ class OCGAnalyzer:
         self.errors = {}
         self.global_errors = []
         self.states = {}
+        self.ambiguous_names = set()
         self.registry_complete = False
         try:
             self.load(root)
@@ -35,6 +36,7 @@ class OCGAnalyzer:
             if not isinstance(name, TextStringObject) or not name:
                 raise Unsupported("レイヤー名が不正または空")
             if name in self.groups:
+                self.ambiguous_names.add(str(name))
                 self.errors.setdefault(str(name), []).append(f"レイヤー名が重複: {name}")
             self.groups[str(name)] = group
             self.by_object[id(group)] = str(name)

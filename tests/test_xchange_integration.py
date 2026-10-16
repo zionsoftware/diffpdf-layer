@@ -4,11 +4,13 @@ import json
 from pathlib import Path
 
 import pytest
+from pypdf import PdfReader
 
 from conftest import statuses
 from test_comparison import result
 from pdf_layer_compare.comparator import compare_files
-from pdf_layer_compare.model import Status
+from pdf_layer_compare.model import BODY, UNLAYERED, Status, layer_key
+from pdf_layer_compare.report import from_json, to_csv, to_json, to_text
 
 ROOT = Path(__file__).resolve().parents[1]
 SAMPLES = ROOT / "output" / "xchange-validation"
@@ -47,6 +49,38 @@ def test_native_unassigned_annotation_is_an_ordinary_group():
     report = compare_files(samples("two-resaved.pdf", "two-unassigned.pdf"))
     assert result(report, "PDF本体").status == Status.MATCH
     assert result(report, "レイヤーなし").status == Status.DIFFERENT
+
+
+@pytest.mark.parametrize("name", ["one-annotations-a.pdf", "one-annotations-b.pdf", "two-unassigned.pdf"])
+def test_native_recorded_authors_match_direct_annotation_counts(name):
+    path, = samples(name)
+    before = sha256(path.read_bytes()).digest()
+    reader = PdfReader(path, strict=True)
+    expected = {UNLAYERED: ({}, 0)}
+    for group in reader.root_object.get("/OCProperties", {}).get("/OCGs", []):
+        expected[layer_key(str(group.get_object()["/Name"]))] = ({}, 0)
+    for page in reader.pages:
+        for ref in page.get("/Annots", []):
+            annot = ref.get_object()
+            key = layer_key(str(annot["/OC"]["/Name"])) if "/OC" in annot else UNLAYERED
+            counts, unset = expected[key]
+            name = str(annot.get("/T", ""))
+            if name:
+                counts[name] = counts.get(name, 0) + 1
+            else:
+                expected[key] = counts, unset + 1
+    report = compare_files([path, path])
+    for row in report.results:
+        if row.component == BODY:
+            continue
+        counts, unset = expected[row.component]
+        assert row.reference_authors.counts == counts
+        assert row.reference_authors.unset_count == unset
+        assert row.reference_authors.complete and row.target_authors.complete
+        assert row.authors_changed is False
+    assert from_json(to_json(report)) == report
+    assert "合成順序" not in to_json(report) + to_text(report) + to_csv(report)
+    assert sha256(path.read_bytes()).digest() == before
 
 
 def test_derived_samples_are_checked_separately():

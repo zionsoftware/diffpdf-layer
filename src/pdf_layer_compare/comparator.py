@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from .model import BODY, COMPOSITION, UNLAYERED, Report, Result, Status, layer_key
+from .model import BODY, UNLAYERED, AuthorInfo, Report, Result, Status, layer_key
 from .pdf_parser import analyze_document, open_document
 
 
@@ -24,6 +24,16 @@ def first_difference(left, right, path="値", depth=0):
     return f"{path}: {str(left)[:180]!r} → {str(right)[:180]!r}"
 
 
+def author_info(snapshot, component):
+    if snapshot.file_error:
+        return AuthorInfo(complete=False, group_present=None, errors=["ファイルを解析できず、作成者集計を取得できません"])
+    if component in snapshot.authors:
+        return snapshot.authors[component]
+    if snapshot.ocg and snapshot.ocg.registry_complete:
+        return AuthorInfo(group_present=False)
+    return AuthorInfo(complete=False, group_present=None, errors=["グループの存在・作成者集計を確定できません"])
+
+
 def compare_files(paths):
     paths = [str(Path(p).resolve()) for p in paths]
     report = Report(paths)
@@ -38,7 +48,7 @@ def compare_files(paths):
     all_names = sorted(set().union(*(s.names for s in snapshots)))
     a = snapshots[0]
     for b in snapshots[1:]:
-        for component in [BODY, UNLAYERED, *(layer_key(n) for n in all_names), COMPOSITION]:
+        for component in [BODY, UNLAYERED, *(layer_key(n) for n in all_names)]:
             left, right = a.groups.get(component), b.groups.get(component)
             is_layer = component.startswith("レイヤー: ")
             unknown_registry = any(s.ocg and not s.ocg.registry_complete for s in (a, b))
@@ -51,6 +61,12 @@ def compare_files(paths):
                 elif is_layer and snapshot.ocg and snapshot.ocg.global_errors:
                     errors.extend(f"{snapshot.path}: {e}" for e in snapshot.ocg.global_errors)
             row = Result(a.path, b.path, component, Status.UNKNOWN)
+            if component != BODY:
+                row.reference_authors = author_info(a, component)
+                row.target_authors = author_info(b, component)
+                linfo, rinfo = row.reference_authors, row.target_authors
+                if linfo.complete and rinfo.complete:
+                    row.authors_changed = (linfo.counts, linfo.unset_count) != (rinfo.counts, rinfo.unset_count)
             if errors:
                 row.detail = "\n".join(dict.fromkeys(errors))
             elif is_layer and left is None:
