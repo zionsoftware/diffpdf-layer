@@ -1,6 +1,9 @@
 from contextlib import contextmanager
 from io import BytesIO
+from datetime import datetime, timezone
+from hashlib import sha256
 import logging
+import os
 from pathlib import Path
 
 import pypdf
@@ -10,7 +13,7 @@ from pypdf.generic import DictionaryObject, IndirectObject, StreamObject
 from .annotation_analyzer import analyze_annotations
 from .authors import collect_authors, initialize_authors
 from .base_analyzer import DrawingAnalyzer, page_attributes, validate_resource
-from .model import BODY, UNLAYERED, Content, Group, Snapshot, Unsupported, combine, layer_key
+from .model import BODY, UNLAYERED, Content, FileInfo, Group, Snapshot, Unsupported, combine, layer_key
 from .normalize import Canonicalizer, array, check_numeric_precision, content_operations, dictionary, resolve, stream_data
 from .ocg_analyzer import OCGAnalyzer
 
@@ -54,14 +57,25 @@ def open_document(path):
     """Read into memory without holding a writable source handle."""
     path = str(Path(path).resolve())
     snapshot = Snapshot(path)
+    snapshot.file_info = FileInfo(path)
     try:
         if pypdf.__version__ != "6.20.1":
             raise Unsupported(f"未検証の pypdf バージョン: {pypdf.__version__} (必要: 6.20.1)")
         with parser_messages() as messages:
             with open(path, "rb") as source:
+                before = os.fstat(source.fileno())
+                snapshot.file_info.size_bytes = before.st_size
+                snapshot.file_info.modified_at = datetime.fromtimestamp(before.st_mtime, timezone.utc).isoformat(timespec="microseconds")
                 data = source.read(MAX_FILE + 1)
+                after = os.fstat(source.fileno())
+            current = Path(path).stat()
+            # Windows path.stat() and fstat() can report different ctime values.
+            identity = lambda s: (s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns)
+            if identity(before) != identity(after) or identity(after) != identity(current) or len(data) != before.st_size and len(data) <= MAX_FILE:
+                raise Unsupported("読み込み中に入力PDFが変更されました。再比較してください")
             if len(data) > MAX_FILE:
                 raise Unsupported("ファイルサイズの上限 (128 MiB) 超過")
+            snapshot.file_info.sha256 = sha256(data).hexdigest()
             check_numeric_precision(data)
             reader = PdfReader(BytesIO(data), strict=True)
             if reader.is_encrypted:
@@ -80,6 +94,7 @@ def open_document(path):
             return snapshot, reader
     except Exception as exc:
         snapshot.file_error = f"{type(exc).__name__}: {exc}"
+        snapshot.file_info.error = snapshot.file_error
         return snapshot, None
 
 

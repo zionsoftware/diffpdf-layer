@@ -1,6 +1,12 @@
 # テスト仕様書・検証結果
 
-対象: diffpdf-layer 0.1.0。整理日: 2026-10-16。文書変更前コード: `a6ea83987e17b5361a3c59264d106b39bc0711f2`。
+対象: diffpdf-layer 0.2.0。整理日: 2026-10-26。文書変更前コード: `a6ea83987e17b5361a3c59264d106b39bc0711f2`。
+
+## 0. 0.2.0の追加試験
+
+[test_workflow.py](../tests/test_workflow.py)で任意工程4パターン、最後の工程の基準化、全6組×7比較項目×不一致/検証不能の業務規則、必須レイヤーの不足・重複・追加、同一パスの複数役割、SHA-256・更新日時・容量、読み込み中の変更、旧JSON移行・不正データ拒否、役割別CLI、日本語PDF・長いパス・複数ページ、PDF依存不足、オフラインPDF配布を検証する。
+
+今回の変更はフォントのみ変更・追加・削除を不一致に統合する。下記の旧版実機履歴にある「フォントのみ変更の一致」等の表記は当時の記録であり、0.2.0の三分類は[工程別比較の仕様](workflow-specification.md)に従う。
 
 ## 1. 方針・環境・区分
 
@@ -41,7 +47,7 @@
 
 | TC-ID | 要件ID | 条件・代表する既存テスト | 期待結果 |
 |---|---|---|---|
-| TC-001 | FR-001、FR-002 | C: test_reference_comparison_order、test_input_count | 2～4件では先頭対後続の組が得られ、0/1/5件は入力エラー |
+| TC-001 | FR-001、FR-002 | C: test_reference_comparison_order、test_input_count | 2～4件では全1/3/6組が得られ、0/1/5件は入力エラー |
 | TC-002 | FR-003 | C: test_base_changes、R: test_no_ocg_base_only、E: test_empty_transition_is_default、test_transition_parameters_retained | ページ数・回転・領域・非空Trans差は本体へ。空Trans追加やOCGなしの同一PDFは一致 |
 | TC-003 | FR-004 | G: test_unlayered_demo_drawing_and_links_do_not_pollute_layers、test_demo_uri_only_change_is_local、C: test_unassigned_annotation | DEMO・URI・未所属注釈は通常のレイヤーなし。変更を他OCGへ波及させない |
 | TC-004 | FR-005、FR-006 | G: test_add_remove_and_duplicate_names、test_visibility_change_only_marks_affected_group、E: test_editor_usage_and_auto_state | 新規追加・削除、重複名の検証不能、関連表示状態の局所差が正しい |
@@ -71,10 +77,10 @@
 |---|---|---|---|
 | TC-019 | FR-015、FR-023、NFR-004 | G: test_unsupported_isolated_unit_keeps_other_groups、test_unreadable_ocg_registry_is_not_an_empty_matching_registry、C: test_unaffected_pair_continues、test_unsafe_content_unknown、O: test_complex_unseparated_state_is_unknown | 局所失敗は局所化し、登録一覧・状態が不明なら範囲を広げて検証不能 |
 | TC-020 | FR-016、FR-017、NFR-006 | U: test_gui_subprocess_and_details | 子プロセス結果・詳細・基準表示・並べ替えが連動し、入力変更で旧結果無効 |
-| TC-021 | FR-017、FR-024 | U: test_gui_preserves_all_group_statuses_and_saved_results、test_gui_details_keep_author_changes_separate_from_content | GUIで6判定と作成者詳細を保持し、作成者差でも一致表示を維持。総合判定なし |
+| TC-021 | FR-017、FR-024 | U: test_gui_preserves_all_group_statuses_and_saved_results、test_gui_details_keep_author_changes_separate_from_content | GUIで3判定と作成者詳細を保持し、作成者差でも一致表示を維持。PDF全体と業務判定を分離 |
 | TC-022 | FR-018、NFR-006 | U: test_gui_cancel、test_gui_timeout_never_success | 中止後は結果なし。待機上限を極小値に置換した試験で時間超過を成功にしない |
 | TC-023 | FR-019、FR-023 | U: test_cli、test_cli_error_exit、test_offline_source_bundle | CLI JSON、--output、--checkを確認。不一致でも0、入力不足・ファイルエラーは2。--cliのTXT分岐と--output単独無効はコード照合 |
-| TC-024 | FR-020、FR-024、NFR-007 | U: test_report_roundtrip_and_exports、O: test_reports_include_metadata_and_no_composition_or_identity_claim、G: test_report_has_no_overall_judgment_and_roundtrips_fonts | TXT/CSV/JSONの判定・参考情報が整合。8列・schema 3・フォント差を保持し、合成順序を出さない |
+| TC-024 | FR-020、FR-024、NFR-007 | U: test_report_roundtrip_and_exports、O: test_reports_include_metadata_and_no_composition_or_identity_claim、G: test_report_separates_pair_summaries_and_roundtrips_fonts | TXT/CSV/JSONの判定・参考情報が整合。明細10列・schema 4・フォント差を保持し、合成順序を出さない |
 | TC-025 | FR-021 | O: test_schema2_load_is_explicitly_incomplete_and_requires_recomparison、test_schema3_rejects_truncated_author_counts、test_schema3_rejects_unreliable_author_metadata | 旧判定を現仕様の一致にせず再比較案内。欠落・不正件数・虚偽の完全性/変更フラグを拒否 |
 | TC-026 | FR-022、NFR-003、NFR-007 | U: test_source_overwrite_prohibited、test_hardlink_overwrite_prohibited、C: test_identical_and_sources_unchanged | 入力上書き拒否、別名ハードリンクも拒否、比較前後ハッシュ不変 |
 | TC-027 | FR-023、NFR-004、NFR-005 | C: test_corrupt_pdf、test_unknown_catalog_structure、R: test_encryption、test_unsupported_or_malformed_ops、test_form_cycle、test_generic_resource_cycle、test_appearance_cycle | 暗号化・破損・未知・循環・数値精度等を検証不能。上限の全境界試験ではない |
@@ -220,3 +226,22 @@ GUIには利用可能なTk画面セッションが必要で、利用できない
 外部のPython/pypdf公式配布ページを確認し、既存技術資料のPDF仕様書URLはHTTP HEADで200を確認した。リポジトリはgit ls-remoteでmainの一致を再確認した。将来の外部URL変更まで保証するものではない。
 
 開始時の実装・起動処理・テスト・元PDFを含む28ファイルのSHA256と終了時の値が一致した。src、main.py、start.bat、tools、testsは変更していない。既存技術資料5文書は保持し、古い記述の補正等だけを行った。PDF・私有検証出力をGitへ追加していない。
+
+
+## 0.2.0の再実行手順
+
+PDFを含む開発検証ではrequirements-dev.txtとrequirements-pdf.txtを開発用venvに導入する。
+
+```bat
+.venv\Scripts\python.exe -m pytest -q --basetemp=output/pytest-run --junitxml=output/pytest-run.xml
+```
+
+--basetempには作業用の新しいフォルダーを指定する。Windowsの制限付き実行環境でハードリンク作成が拒否された場合は該当試験がスキップされる。権限のある環境で同じ試験を別途実行し、入力の別名上書き拒否を確認する。実機PDFがない環境のスキップも実行結果に区別して記録する。
+
+## 0.2.0の実行結果
+
+2026-10-26、Windows・Python 3.14.8・Tk 9.0・pypdf 6.20.1、PDF出力はReportLab 4.4.9・Pillow 12.3.0・charset-normalizer 3.5.2で実行した。最終実行は380件成功、失敗0件、スキップ0件、181.84秒だった。利用可能な既存のPDF-XChange実出力の回帰試験を含むが、新たなEditor操作での実出力作成を意味しない。
+
+GUIの中止・終了時のworker回収とafter解除を確認し、Tkインタープリターの回収を所有スレッドで行うテスト構成とした。追加レイヤーが別入力で検出され、基準PDFを解析できない場合にも、双方に存在しないと断定せず検証不能と表示する回帰試験を含む。
+
+通常Pythonに-B -Sを付けたオフライン配布からPDF保存を確認した。リポジトリ直下のstart.bat --check、およびstart.bat --cliからcmp.txt・cmp.pdfの保存も成功した。生成レポート7ページとWord版マニュアルのレンダリング7ページを全ページ表示し、日本語・表・折り返し・改ページを確認した。全Windows版・全フォント・大量データの性能を網羅検証した結果ではない。

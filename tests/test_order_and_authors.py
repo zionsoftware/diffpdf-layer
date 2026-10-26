@@ -134,7 +134,7 @@ def test_form_invocations_can_move_but_form_internal_order_is_kept(make_pdf):
 def test_order_change_with_font_change_still_reports_font_only(make_pdf):
     a = make_pdf(content=TEXT + " " + RECT_A, mutate=install(("/F1", font("/MS-Gothic"))))
     b = make_pdf(content=RECT_A + " " + TEXT, mutate=install(("/F1", font("/MS-Mincho"))))
-    assert arow(compare_files([a, b])).status == Status.FONT_ONLY
+    assert arow(compare_files([a, b])).status == Status.DIFFERENT
 
 
 def test_author_only_change_is_a_match_and_reference_information(make_pdf):
@@ -178,7 +178,7 @@ def test_font_and_author_change_are_independent(make_pdf):
     a = make_pdf(annotations=[{"/Contents": "同じ文字", "/DA": "/F1 12 Tf", "/T": "userA"}], mutate=install(("/F1", font())))
     b = make_pdf(annotations=[{"/Contents": "同じ文字", "/DA": "/F1 12 Tf", "/T": "userB"}], mutate=install(("/F1", font("/MS-Mincho"))))
     row = arow(compare_files([a, b]))
-    assert row.status == Status.FONT_ONLY and row.font_changes
+    assert row.status == Status.DIFFERENT and row.font_changes
     assert row.authors_changed is True
     assert row.reference_authors.counts == {"userA": 1} and row.target_authors.counts == {"userB": 1}
 
@@ -266,7 +266,7 @@ def test_reports_include_metadata_and_no_composition_or_identity_claim(make_pdf)
     before = [sha256(p.read_bytes()).digest() for p in (a, b)]
     report = compare_files([a, b])
     data = json.loads(to_json(report))
-    assert data["schema_version"] == 3
+    assert data["schema_version"] == 4
     row = next(r for r in data["results"] if r["component"] == "レイヤー: 担当者")
     assert row["status"] == "一致" and row["authors_changed"] is True
     assert row["reference_authors"]["counts"] == {"userA": 1}
@@ -275,7 +275,8 @@ def test_reports_include_metadata_and_no_composition_or_identity_claim(make_pdf)
         assert "合成順序" not in output
         assert "userA" in output and "userB" in output
     rows = list(csv.reader(io.StringIO(to_csv(report))))
-    assert all(len(r) == 8 for r in rows)
+    detail_start = next(i for i, r in enumerate(rows) if r and r[0] == "比較元PDF")
+    assert all(len(r) == 10 for r in rows[detail_start:])
     assert "注釈の作成者名（PDF記録値）" in to_text(report)
     assert [sha256(p.read_bytes()).digest() for p in (a, b)] == before
 
@@ -295,7 +296,7 @@ def test_schema2_load_is_explicitly_incomplete_and_requires_recomparison(make_pd
     assert "再比較" in to_text(old)
 
 
-def test_schema3_rejects_truncated_author_counts(make_pdf):
+def test_schema4_rejects_truncated_author_counts(make_pdf):
     a = make_pdf()
     data = json.loads(to_json(compare_files([a, a])))
     data["results"][1]["reference_authors"] = {"complete": True}
@@ -304,7 +305,7 @@ def test_schema3_rejects_truncated_author_counts(make_pdf):
 
 
 @pytest.mark.parametrize("change", ["missing", "false_complete", "false_change"])
-def test_schema3_rejects_unreliable_author_metadata(make_pdf, change):
+def test_schema4_rejects_unreliable_author_metadata(make_pdf, change):
     a = make_pdf(annotations=[{"/T": "userA"}])
     data = json.loads(to_json(compare_files([a, a])))
     row = next(r for r in data["results"] if r["component"] == "レイヤー: 担当者")
@@ -346,12 +347,12 @@ def test_absent_layer_and_unreadable_file_are_explicit(make_pdf, tmp_path):
     a = make_pdf(names=("担当者",), annotations=[{"/T": "userA"}])
     b = make_pdf(names=("担当者", "確認者"), annotations=[{"/T": "userB", "owner": 1}])
     row = result(compare_files([a, b]), "レイヤー: 確認者")
-    assert row.status == Status.ADDED
+    assert row.status == Status.DIFFERENT
     assert row.reference_authors.complete and row.reference_authors.group_present is False
     assert row.target_authors.counts == {"userB": 1}
     assert row.authors_changed is True
     row = result(compare_files([b, a]), "レイヤー: 確認者")
-    assert row.status == Status.REMOVED and row.target_authors.group_present is False
+    assert row.status == Status.DIFFERENT and row.target_authors.group_present is False
     row = arow(compare_files([a, tmp_path / "missing.pdf"]))
     assert row.status == Status.UNKNOWN and row.authors_changed is None
     assert not row.target_authors.complete and row.target_authors.group_present is None
@@ -363,5 +364,6 @@ def test_author_names_are_literal_and_csv_quotes_control_characters(make_pdf):
     report = compare_files([a, a])
     assert arow(report).reference_authors.counts == dict.fromkeys(names, 1)
     parsed = list(csv.reader(io.StringIO(to_csv(report))))
-    assert all(len(row) == 8 for row in parsed)
-    assert '=user,\\nA' in parsed[3][5]
+    start = next(i for i, row in enumerate(parsed) if row and row[0] == "比較元PDF")
+    assert all(len(row) == 10 for row in parsed[start:])
+    assert any('=user,\\nA' in row[5] for row in parsed[start + 1:])

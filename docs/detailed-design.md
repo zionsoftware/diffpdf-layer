@@ -1,6 +1,6 @@
 # 詳細設計書
 
-対象: diffpdf-layer 0.1.0。調査基準: 2026-10-16、文書変更前のmain `a6ea83987e17b5361a3c59264d106b39bc0711f2`。
+対象: diffpdf-layer 0.2.0。調査基準: 2026-10-16、文書変更前のmain `a6ea83987e17b5361a3c59264d106b39bc0711f2`。
 
 [基本設計書](basic-design.md)の方式を、現行コードへ対応付ける。関数名・属性名は調査時の実装名である。対応条件の一覧は[対応構造一覧](supported-structures.md)、検証対応は[テスト仕様書](test-specification.md)を参照する。
 
@@ -19,9 +19,9 @@
 | [authors.py](../src/pdf_layer_compare/authors.py) | initialize_authors/collect_authors。独立した/T集計 |
 | [fonts.py](../src/pdf_layer_compare/fonts.py) | Font、unicode_map、text_value。通常値・安全な文字復元・二次値 |
 | [normalize.py](../src/pdf_layer_compare/normalize.py) | resolve、Canonicalizer、stream_data、content_operations。共通検査と正規化 |
-| [comparator.py](../src/pdf_layer_compare/comparator.py) | compare_files、author_info、first_difference。基準対各対象・6判定 |
+| [comparator.py](../src/pdf_layer_compare/comparator.py) | compare_files、author_info、first_difference。全組合せ・内容三分類・業務判定集約 |
 | [model.py](../src/pdf_layer_compare/model.py) | 状態列挙、Content等のデータ、combine、グループ名 |
-| [report.py](../src/pdf_layer_compare/report.py) | TXT/CSV/JSON、旧JSON移行、作成者整形、保存先保護 |
+| [report.py](../src/pdf_layer_compare/report.py) | TXT/PDF/CSV/JSON、旧JSON移行、作成者整形、保存先保護 |
 | [start.bat](../start.bat)、[run_python.bat](../tools/run_python.bat) | 作業ディレクトリ設定、通常Python選択、-B -S起動、終了コード伝達 |
 | [prepare_offline.py](../tools/prepare_offline.py) | 開発側の配布ソース作成補助。オンライン利用者の必須手順にしない |
 
@@ -32,13 +32,13 @@
 
 | 構造 | 実在する主要属性・役割 |
 |---|---|
-| Status | MATCH、FONT_ONLY、DIFFERENT、ADDED、REMOVED、UNKNOWN。値は日本語の6判定 |
+| Status | MATCH、DIFFERENT、UNKNOWN。値は日本語の3判定 |
 | Content | exact=通常値、semantic=フォントを分離した二次値、fonts=使用名・指紋、font_errors=分離不能理由 |
 | Group | values: Contentのリスト、errors: 理由のリスト。content()で順序付きのグループ値へ結合 |
 | Snapshot | path、names、ocg、groups、file_error、authors。1入力の解析結果 |
 | AuthorInfo | counts、unset_count、unreadable_count、complete、group_present、errors。incomplete(reason)で完全性を下げる |
 | Result | left、right、component、status、detail、font_changes、reference_authors、target_authors、authors_changed |
-| Report | files、results、errors。全体のstatus属性は持たない |
+| Report | files、roles、reference、file_info、pairs、layer_names、extra_names、results、errors。pairsにoverallとbusinessを保持 |
 | Unsupported | 安全に対応できない入力を示すValueError派生例外 |
 
 グループ定数はBODY="PDF本体"、UNLAYERED="レイヤーなし"、layer_key(name)="レイヤー: 名前"である。作成者情報はPDF本体のResultではNoneとなる。
@@ -119,15 +119,15 @@ author_infoはファイル失敗時にcomplete=False/group_present=None、登録
 <a id="dd-08"></a>
 ## 8. グループ判定・エラー範囲（DD-08）
 
-compare_filesは2～4件を検証し、各入力を一度解析する。1番目を基準に、後続それぞれとPDF本体・レイヤーなし・名前順の各OCGを比較する。各行の作成者情報は内容判定と独立して設定する。
+compare_filesは2～4件を検証し、各入力を一度解析する。役割順に全組合せについてPDF本体・レイヤーなし・名前順の各OCGを比較する。主表の基準は最後の工程で、レイヤー登録順を保持する。各行の作成者情報は内容判定と独立して設定する。
 
 ```text
 エラーがあれば UNKNOWN（理由を保持）
-それ以外でOCGが基準にないなら ADDED、対象にないなら REMOVED
+それ以外で片方にしかOCGがないなら DIFFERENT（追加・削除を詳細へ記録）
 必要グループが取得できなければ UNKNOWN
 exact が同じなら MATCH
 exact が異なり font_errors があれば UNKNOWN
-semantic が同じで使用フォント集合が異なれば FONT_ONLY + font_changes
+semantic が同じで使用フォント集合が異なれば DIFFERENT + font_changes（詳細: フォントのみ変更）
 それ以外は DIFFERENT + first_difference
 ```
 
@@ -143,7 +143,7 @@ font_changesはbefore/after内部名、source、before_fingerprints/after_finger
 | 未知Catalog・ページ構造・内容解析時の全体警告 | 全グループ |
 | 作成者/Tの失敗 | 作成者集計の完全性のみ。既知なら局所、不明なら集計範囲を拡大 |
 
-全比較の停止や総合不一致への集約は行わない。ただし影響範囲を安全に限定できない失敗は複数行を検証不能にする。
+局所エラーで他の比較を止めない。各組の全体一致状況と業務判定はbusiness.pyで集約する。ただし影響範囲を安全に限定できない失敗は複数行を検証不能にする。
 
 <a id="dd-09"></a>
 ## 9. レポートと保存（DD-09）
@@ -152,15 +152,15 @@ row_detailsはパス、対象、内容判定、差異と双方のauthor_summary�
 
 | 形式 | 実際の構造 |
 |---|---|
-| TXT | to_text。入力順・ファイルエラー・各行の共通詳細。UTF-8 |
-| CSV | to_csv。基準PDF、比較対象PDF、対象、内容判定、詳細、基準PDF 注釈の作成者名（PDF記録値）、比較対象PDF 注釈の作成者名（PDF記録値）、作成者名の構成の変更の8列。UTF-8 BOM付き |
-| JSON | to_json。schema_version=3、files、reference、targets、results、errors。Result/AuthorInfoの属性を構造化。UTF-8 |
+| TXT | to_text。ファイル情報、主表、全組合せ一覧、各行の共通詳細。UTF-8 |
+| CSV | to_csv。ファイル情報・主表・全組合せ・比較明細のセクション。明細は比較元PDF・比較先PDF・対象・内容判定・詳細・双方の作成者情報・構成変更・左右役割の10列。UTF-8 BOM付き |
+| JSON | to_json。schema_version=4、files、roles、reference、targets、file_info、pairs、layer_names、extra_names、results、errors。Result/AuthorInfoの属性を構造化。UTF-8 |
 
 CSVの集計は1セルの文字列であり、名前ごとに別行を設けない。font_changes専用構造はJSON、TXT/CSV/GUIにはフォント差の説明を保持する。CSVではReport.errorsを「ファイル解析」の検証不能行として出す。
 
-from_jsonはversion 3の必須集計属性、正の名前別件数、非負の未設定/取得不能件数、完全性、存在、構成変更の整合等を検査する。version 2は旧合成順序行を除去し、各行をUNKNOWNへ変換して旧判定を詳細に残し、Report.errorsへ再比較案内を追加する。これはライブラリとGUI内部通信の機能で、利用者向けの保存JSONを開く画面はない。
+serialization.from_jsonはversion 4の役割・組合せ・集約判定・ファイル情報と必須集計属性、正の名前別件数、非負の未設定/取得不能件数、完全性、存在、構成変更の整合等を検査する。version 2は旧合成順序行を除去する。version 2・3の各行をUNKNOWNへ変換して旧判定を詳細に残し、Report.errorsへ再比較案内を追加する。これはライブラリとGUI内部通信の機能で、利用者向けの保存JSONを開く画面はない。
 
-save_reportは拡張子を.txt/.csv/.jsonに限定する。resolveしたパスのnormcase比較と、既存ファイルのos.path.samefileで入力PDFへの上書きを拒否する。CSVのcsv_cellは左側空白を除いた先頭が=、+、-、@なら引用符を先置する。保存先の親フォルダーは作らず、通常のwrite_textで書く。入力でない既存ファイルは上書きされうる。原子的な置換・履歴保存は実装していない。
+save_reportは拡張子を.txt/.pdf/.csv/.jsonに限定する。resolveしたパスのnormcase比較と、既存ファイルのos.path.samefileで入力PDFへの上書きを拒否する。CSVのcsv_cellは左側空白を除いた先頭が=、+、-、@なら引用符を先置する。保存先の親フォルダーは作らず、一時ファイルへ完全に書き込んでからos.replaceで置換する。入力でない既存ファイルは上書きされうる。生成エラーでは既存出力を残す。履歴保存は行わない。
 
 <a id="dd-10"></a>
 ## 10. 起動・GUI・CLI制御（DD-10）
@@ -181,6 +181,19 @@ GUIタイムアウト・読めないJSON・起動失敗時はreport=Noneとし�
 | --output | --cli/--jsonと併用し、拡張子で保存形式を選ぶ。単独ではGUI起動で保存されない |
 | 終了コード0 | コマンド処理成功。内容不一致・グループ検証不能を含む場合がある |
 | 終了コード2 | 環境確認失敗、入力個数・ファイル解析等のReport.errors、argparseの引数エラー |
-| 保存例外等 | CLIでは一括捕捉せず異常終了しうる。すべての失敗が2になる保証はない |
+| 保存例外等 | OSError/ValueErrorはerrorsへ記録し終了コード2。予期しないプログラム例外は対象外 |
 
-ソフトウェア版は[__init__.py](../src/pdf_layer_compare/__init__.py)の__version__="0.1.0"。CLIの--versionやGUIの版表示は実装していない。導入手順は[インストール手順書](installation-guide.md)を参照する。
+ソフトウェア版は[__init__.py](../src/pdf_layer_compare/__init__.py)の__version__="0.2.0"。CLIの--versionやGUIの版表示は実装していない。導入手順は[インストール手順書](installation-guide.md)を参照する。
+
+
+## 11. 工程別判定と監査情報
+
+business.summarizeは前工程までの業務レイヤー、PDF本体・レイヤーなし・任意名の追加レイヤーを一致必須とし、後工程の業務レイヤーを差異許容とする。必須項目の不一致をFAIL、未確定をUNVERIFIABLE、全一致をPASSとする。PairSummaryに左右役割・パス・全体一致・業務判定・必須/許容項目・理由を保持する。規則表は[工程別比較の仕様](workflow-specification.md)を参照する。
+
+FileInfoは役割・パス・完全なSHA-256・UTC更新日時・バイト数・取得エラーを保持する。open_documentが読み込んだdataをハッシュとPdfReaderの両方へ渡す。fstatによる読み込み前後とパスのstatを、dev・ino・size・mtime_nsで照合する。Windowsではfstatとstatのctimeが一致しない場合があるため、照合キーにctimeを含めない。上限超過では部分ハッシュを記録しない。解析不能でも全バイトを読めた場合のFileInfoは保持する。
+
+report.matrix_rowsをGUI・TXT・PDF・CSVで共用する。主表は最後の工程の登録レイヤー順を保持し、基準外の名前を別枠にする。左右の役割で比較を識別するため、同じパスを複数役割に指定しても区別できる。serializationはJSON v4を扱い、保存された業務集約と各明細の整合も検査する。
+
+pdf_report.to_pdfは依存を遅延読み込みし、ReportLabのLongTableで見出しを繰り返してセル内改ページも許可する。DIFFPDF_REPORT_FONT、vendor/fonts/Japanese.ttf、Windowsのmsgothic.ttcの順に日本語フォントを選ぶ。明示指定が不正な場合は代替せずエラーにする。文字列はXMLエスケープし、外部画像・URLを取得しない。出力はBytesIOで完成させ、save_reportが一時ファイル経由で置き換える。
+
+GUIは役割別欄と2つの結果タブを持ち、保存形式で既定ファイル名を切り替える。中止時は比較子プロセスを停止してworkerの回収を待ち、終了時はafterコールバックも解除する。

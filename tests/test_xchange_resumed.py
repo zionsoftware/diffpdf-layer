@@ -20,7 +20,7 @@ from test_xchange_integration import samples
 
 SESSION = "resume-20261016-181412"
 A, B, EXTRA = (layer_key(name) for name in ("検証者A", "検証者B", "追加検証"))
-M, D, F = Status.MATCH, Status.DIFFERENT, Status.FONT_ONLY
+M, D, F = Status.MATCH, Status.DIFFERENT, Status.DIFFERENT
 
 
 def native_paths(*names):
@@ -64,8 +64,8 @@ def direct_authors(path):
     ("e-width.pdf", "b-shape-author.pdf", M, M, M, None, {A}),
     ("b-shape-author.pdf", "e-color.pdf", M, D, M, None, set()),
     ("e-color.pdf", "e-delete.pdf", M, D, M, None, {A}),
-    ("e-delete.pdf", "g-added.pdf", D, M, M, Status.ADDED, {UNLAYERED}),
-    ("g-added.pdf", "g-removed.pdf", D, M, M, Status.REMOVED, {UNLAYERED}),
+    ("e-delete.pdf", "g-added.pdf", D, M, M, Status.DIFFERENT, {UNLAYERED}),
+    ("g-added.pdf", "g-removed.pdf", D, M, M, Status.DIFFERENT, {UNLAYERED}),
     ("g-removed.pdf", "d-font-mincho.pdf", D, F, M, None, {UNLAYERED}),
     ("d-font-mincho.pdf", "h-optimized.pdf", D, M, M, None, {UNLAYERED}),
     ("h-normal-before.pdf", "h-normal.pdf", M, M, M, None, {B}),
@@ -80,7 +80,9 @@ def test_resumed_native_case_and_outputs(before, after, unlayered, a, b, extra, 
         expected[EXTRA] = extra
     assert {row.component: row.status for row in report.results} == expected
     direct = [direct_authors(path) for path in paths]
-    csv_rows = {row["対象"]: row for row in csv.DictReader(StringIO(to_csv(report)))}
+    csv_text = to_csv(report)
+    detail_csv = csv_text[csv_text.index("比較元PDF,"):]
+    csv_rows = {row["対象"]: row for row in csv.DictReader(StringIO(detail_csv))}
     text = to_text(report)
     assert from_json(to_json(report)) == report
     assert "合成順序" not in text + to_json(report) + to_csv(report)
@@ -88,12 +90,12 @@ def test_resumed_native_case_and_outputs(before, after, unlayered, a, b, extra, 
         assert csv_rows[row.component]["内容判定"] == row.status
         # GUI and TXT use this same detail formatter.
         assert row_details(row) in text
-        if row.status == F:
+        if row.component == A and (before, after) in {("baseline-a.pdf", "b-author.pdf"), ("g-removed.pdf", "d-font-mincho.pdf")}:
             assert row.font_changes
         if row.component == BODY:
             continue
         assert row.authors_changed is (row.component in changed)
-        for side, info, raw in zip(("基準PDF", "比較対象PDF"),
+        for side, info, raw in zip(("比較元PDF", "比較先PDF"),
                                   (row.reference_authors, row.target_authors), direct):
             counts, unset = raw.get(row.component, (Counter(), 0))
             assert info.complete and not info.errors and info.unreadable_count == 0

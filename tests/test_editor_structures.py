@@ -89,7 +89,7 @@ def test_empty_form_annotation_fonts(make_pdf):
     assert statuses(compare_files([a, a])) == {Status.MATCH}
     report = compare_files([a, b])
     assert result(report, "レイヤーなし").status == Status.MATCH
-    assert result(report, "レイヤー: 担当者").status == Status.FONT_ONLY
+    assert result(report, "レイヤー: 担当者").status == Status.DIFFERENT
 
 
 @pytest.mark.parametrize("form", [

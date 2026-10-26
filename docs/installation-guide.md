@@ -1,6 +1,6 @@
 # インストール・セットアップ手順書
 
-対象: diffpdf-layer 0.1.0。更新日: 2026-10-16。
+対象: diffpdf-layer 0.2.0。更新日: 2026-10-26。
 
 ## 1. 動作環境
 
@@ -83,7 +83,7 @@ start.bat --check
 start.bat
 ```
 
-「PDF を追加」で2～4個を指定して使います。操作と判定の読み方は[ユーザーマニュアル](user-manual.md)を参照してください。起動用BATは環境確認と起動だけを行い、インストール・ダウンロード・venv作成・ZIP展開をしません。setup.batはありません。
+担当・確認の欄は必須で指定し、必要に応じて審査・承認も指定します。操作と判定の読み方は[ユーザーマニュアル](user-manual.md)を参照してください。起動用BATは環境確認と起動だけを行い、インストール・ダウンロード・venv作成・ZIP展開をしません。setup.batはありません。
 
 <a id="python-path"></a>
 ## 6. Pythonの場所を指定する
@@ -108,14 +108,14 @@ start.bat
 GUIを使わない比較には--cliまたは--jsonを指定します。パスに空白がある場合も、下記のように引用符で囲みます。保存先フォルダーは先に作成してください。
 
 ```bat
-start.bat --cli "C:\PDF\基準.pdf" "C:\PDF\比較.pdf"
-start.bat --json --output "C:\結果\比較.json" "C:\PDF\基準.pdf" "C:\PDF\比較.pdf"
-start.bat --cli --output "C:\結果\比較.csv" "C:\PDF\基準.pdf" "C:\PDF\比較1.pdf" "C:\PDF\比較2.pdf"
+start.bat --cli "C:\PDF\担当.pdf" "C:\PDF\確認.pdf"
+start.bat --json --output "C:\結果\比較.json" "C:\PDF\担当.pdf" "C:\PDF\確認.pdf"
+start.bat --cli --output "C:\結果\比較.csv" "C:\PDF\担当.pdf" "C:\PDF\確認.pdf" "C:\PDF\審査.pdf"
 ```
 
 --cliはTXT、--jsonはJSONを標準出力へ出します。--outputで保存する形式は拡張子で選びます。--outputは--cli/--jsonと併用してください。--output単独ではGUIが開き、自動保存しません。--checkは比較せず環境確認を行います。--helpで引数の説明を表示できます。
 
-終了コード0はコマンド処理が完了した意味で、全グループ一致を意味しません。不一致やグループ単位の検証不能でも0となりえます。環境・入力個数・ファイル解析等のエラーは2ですが、CLIの保存例外等は別の異常終了となりえます。自動処理では終了コードだけでなく、JSONのerrorsと各resultsのstatus・完全性も確認してください。CLIにはGUIの180秒待機制限はありません。
+終了コード0はコマンド処理が完了した意味で、全グループ一致を意味しません。不一致やグループ単位の検証不能でも0となりえます。環境・入力個数・ファイル解析等のエラーは2ですが、通常の保存エラーもerrorsへ記録し2となります。自動処理では終了コードだけでなく、JSONのerrorsと各pairsのoverall・business、およびresultsのstatusも確認してください。CLIにはGUIの180秒待機制限はありません。
 
 ## 8. エラーへの対処
 
@@ -133,8 +133,34 @@ start.bat --cli --output "C:\結果\比較.csv" "C:\PDF\基準.pdf" "C:\PDF\比�
 
 ## 9. バージョン確認・更新・再配置
 
-環境のPython/pypdf版はstart.bat --checkで確認します。本ツールの版は[src/pdf_layer_compare/__init__.py](../src/pdf_layer_compare/__init__.py)の__version__（現行0.1.0）をテキストで確認できます。--versionやGUIの版表示機能はありません。同じ0.1.0でも改修があるため、配布元のコミットSHAも記録してください。Gitを利用する開発環境ではgit rev-parse HEADで確認できます。
+環境のPython/pypdf版はstart.bat --checkで確認します。本ツールの版は[src/pdf_layer_compare/__init__.py](../src/pdf_layer_compare/__init__.py)の__version__（現行0.2.0）をテキストで確認できます。--versionやGUIの版表示機能はありません。同じ版でも改修があるため、配布元のコミットSHAも記録してください。Gitを利用する開発環境ではgit rev-parse HEADで確認できます。
 
 更新時は新しいツールソースを別フォルダーへ展開し、その版のREADME・本手順で要求されるpypdfを配置して--checkと起動確認を行います。古いソースと新しいソース、複数版のpypdfを混在させないでください。入力PDFと保存結果を更新先へ上書きコピーする必要はありません。比較結果は仕様変更の影響を受けるため、必要なら元PDFから再比較します。
 
 配布時は本ツールの[LICENSE](../LICENSE)とvendorのpypdfライセンスを保持します。実行時のネットワーク断、別Windows版・別DPI等のすべての構成で実機確認済みとするものではありません。検証済み条件と未確認事項は[テスト仕様書](test-specification.md#open-items)を参照してください。
+
+## 10. PDF出力を追加する
+
+比較とTXT保存には不要です。PDF保存を使う環境では、requirements-pdf.txtのReportLab 4.4.9、Pillow 12.3.0、charset-normalizer 3.5.2を、vendorへ追加配置します。実行時のダウンロードやpip実行は行いません。
+
+オンライン側でブラウザーを用いて各パッケージのwheelを取得し、オフライン側でZIPとして展開します。ReportLabはpy3-none-any、Pillowとcharset-normalizerは実行先に合うPython 3.14・Windows・CPU用を選びます。今回の検証対象はcp314・win_amd64です。Pillow等はバイナリを含むため、比較・TXTのみのソース配布とは区別します。
+
+各wheelからreportlab、PIL、charset_normalizerのフォルダーと、各dist-info（LICENSE等を含む）をvendor直下へコピーしてください。wheel内に付属ライブラリ用のフォルダーがある場合も保持します。別Python・別CPU用のファイルを混在させないでください。site-packagesへ置くだけでは、通常の起動が-Sを使用するため読み込まれません。
+
+開発者が同じPython・OS・CPUの環境で配布物を作る場合は、次を実行できます。この手順は開発用で、オフライン利用者が実行する必要はありません。
+
+```bat
+.venv\Scripts\python.exe -m pip install -r requirements-dev.txt -r requirements-pdf.txt
+.venv\Scripts\python.exe tools\prepare_offline.py dist\offline-pdf --with-pdf
+```
+
+通常のWindowsではC:\Windows\Fonts\msgothic.ttcを読み込み、使用文字をPDFへ埋め込みます。別フォントを使う場合は、埋め込みを許可された日本語TrueTypeフォントをvendor\fonts\Japanese.ttfへ配置するか、環境変数DIFFPDF_REPORT_FONTに.ttf/.ttcのフルパスを指定します。Windowsのフォントファイルを配布物へコピーする処理はありません。
+
+```bat
+set "DIFFPDF_REPORT_FONT=C:\Fonts\Japanese.ttf"
+start.bat --cli --responsible "C:\PDF\担当.pdf" --confirmation "C:\PDF\確認.pdf" --approval "C:\PDF\承認.pdf" --output "C:\結果\cmp.pdf"
+```
+
+審査を省略して承認を指定する場合は、このように役割別オプションを使います。位置引数では担当・確認・審査・承認の順となるため、3番目は審査です。役割別オプションと位置引数は併用できません。
+
+PDF依存や日本語フォントが不足している場合は保存エラーとなり、比較結果は保持されます。TXTでの保存も利用できます。--checkはPython・Tkinter・pypdfの比較環境の確認です。PDF出力の準備は、実際にcmp.pdfを保存して確認してください。

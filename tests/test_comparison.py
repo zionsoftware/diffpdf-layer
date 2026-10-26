@@ -39,7 +39,7 @@ def test_layer_name_changes_do_not_stop_other_groups(make_pdf, names):
     if names == ("担当者", "担当者"):
         assert result(report, "レイヤー: 担当者").status == Status.UNKNOWN
     else:
-        assert result(report, "レイヤー: 確認者").status == Status.REMOVED
+        assert result(report, "レイヤー: 確認者").status == Status.DIFFERENT
 
 
 @pytest.mark.parametrize("change", [
@@ -195,13 +195,15 @@ def test_visibility_state(make_pdf):
     assert result(report, "レイヤーなし").status == Status.MATCH
 
 
-@pytest.mark.parametrize("count, pairs", [(2, 1), (3, 2), (4, 3)])
+@pytest.mark.parametrize("count, pairs", [(2, 1), (3, 3), (4, 6)])
 def test_reference_comparison_order(make_pdf, count, pairs):
     files = [make_pdf() for _ in range(count)]
     report = compare_files(files)
     assert statuses(report) == {Status.MATCH}
     observed = list(dict.fromkeys((r.left, r.right) for r in report.results))
-    assert observed == [(str(files[0]), str(p)) for p in files[1:]]
+    from itertools import combinations
+    assert observed == [(str(a), str(b)) for a, b in combinations(files, 2)]
+    assert report.reference == str(files[-1])
     assert len(observed) == pairs
 
 

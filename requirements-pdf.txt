@@ -1,0 +1,4 @@
+# PDF出力のみ。比較処理とTXT出力には不要。
+reportlab==4.4.9
+Pillow==12.3.0
+charset-normalizer==3.5.2

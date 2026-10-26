@@ -85,8 +85,8 @@ def test_add_remove_and_duplicate_names(make_pdf):
     b = make_pdf(names=("A", "C"), annotations=[])
     report = compare_files([a, b])
     assert group(report, "A").status == Status.MATCH
-    assert group(report, "B").status == Status.REMOVED
-    assert group(report, "C").status == Status.ADDED
+    assert group(report, "B").status == Status.DIFFERENT
+    assert group(report, "C").status == Status.DIFFERENT
     duplicate = make_pdf(names=("A", "B", "A"), annotations=[])
     report = compare_files([a, duplicate])
     assert group(report, "A").status == Status.UNKNOWN
@@ -107,7 +107,7 @@ def test_font_family_changes_are_distinct_matches(make_pdf):
     b = make_pdf(content=TEXT + " " + SHAPE_B, mutate=install(("/F1", font("/MS-Mincho"))))
     report = compare_files([a, b])
     row = group(report)
-    assert row.status == Status.FONT_ONLY
+    assert row.status == Status.DIFFERENT
     assert row.font_changes[0]["before"] == ["MS-Gothic"]
     assert row.font_changes[0]["after"] == ["MS-Mincho"]
     assert group(report, "確認者").status == Status.MATCH
@@ -148,7 +148,7 @@ def test_subset_and_reference_names_are_storage_details(make_pdf):
 def test_embedded_program_change_requires_safe_text(make_pdf):
     a = make_pdf(content=TEXT, mutate=install(("/F1", font(program=b"font A"))))
     b = make_pdf(content=TEXT, mutate=install(("/F1", font(program=b"font B"))))
-    assert group(compare_files([a, b])).status == Status.FONT_ONLY
+    assert group(compare_files([a, b])).status == Status.DIFFERENT
     bad_a = make_pdf(content=TEXT, mutate=install(("/F1", font(program=b"font A", encoding=None))))
     bad_b = make_pdf(content=TEXT, mutate=install(("/F1", font(program=b"font B", encoding=None))))
     assert group(compare_files([bad_a, bad_b])).status == Status.UNKNOWN
@@ -181,7 +181,7 @@ def test_freetext_and_appearance_font_encoding_change(make_pdf, appearance):
         return mutate
     a = make_pdf(annotations=[{"/Contents": "日"}], mutate=setup("/MS-Gothic", 1))
     b = make_pdf(annotations=[{"/Contents": "日"}], mutate=setup("/MS-Mincho", 2))
-    assert group(compare_files([a, b])).status == Status.FONT_ONLY
+    assert group(compare_files([a, b])).status == Status.DIFFERENT
 
 
 def test_cid_text_changes_and_unknown_mappings(make_pdf):
@@ -198,7 +198,7 @@ def test_multiple_fonts_are_reported(make_pdf):
     a = make_pdf(content=content, mutate=install(("/F1", font("/A")), ("/F2", font("/B"))))
     b = make_pdf(content=content, mutate=install(("/F1", font("/C")), ("/F2", font("/D"))))
     row = group(compare_files([a, b]))
-    assert row.status == Status.FONT_ONLY
+    assert row.status == Status.DIFFERENT
     assert row.font_changes[0]["before"] == ["A", "B"]
     assert row.font_changes[0]["after"] == ["C", "D"]
 
@@ -231,17 +231,17 @@ def test_generation_number_change(make_pdf, tmp_path):
     assert statuses(compare_files([a, b])) == {Status.MATCH}
 
 
-def test_report_has_no_overall_judgment_and_roundtrips_fonts(make_pdf):
+def test_report_separates_pair_summaries_and_roundtrips_fonts(make_pdf):
     a = make_pdf(content=TEXT, mutate=install(("/F1", font())))
     b = make_pdf(content=TEXT, mutate=install(("/F1", font("/MS-Mincho"))))
     before = sha256(a.read_bytes()).digest(), sha256(b.read_bytes()).digest()
     report = compare_files([a, b])
     data = json.loads(to_json(report))
-    assert data["schema_version"] == 3 and data["reference"] == str(a)
+    assert data["schema_version"] == 4 and data["reference"] == str(b)
     assert "status" not in data and not hasattr(report, "status")
     assert from_json(to_json(report)) == report
     assert "総合" not in to_text(report) + to_csv(report)
-    assert Status.FONT_ONLY.value in to_text(report) and Status.FONT_ONLY.value in to_csv(report)
+    assert Status.DIFFERENT.value in to_text(report) and Status.DIFFERENT.value in to_csv(report)
     assert (sha256(a.read_bytes()).digest(), sha256(b.read_bytes()).digest()) == before
 
 
@@ -311,7 +311,7 @@ def test_bfrange_cmap_and_text_code_changes(make_pdf, array_range):
         return obj
     a = make_pdf(content=TEXT.replace("(Same text)", "<00010002>"), mutate=install(("/F1", cmap_font("/A", 1))))
     b = make_pdf(content=TEXT.replace("(Same text)", "<00030004>"), mutate=install(("/F1", cmap_font("/B", 3))))
-    assert group(compare_files([a, b])).status == Status.FONT_ONLY
+    assert group(compare_files([a, b])).status == Status.DIFFERENT
 
 
 def test_font_mapping_duplicates_fail_closed(make_pdf):

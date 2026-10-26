@@ -107,7 +107,7 @@ def test_image_bytes_change(make_pdf):
 def test_font_resource_changes(make_pdf):
     def mutate(w, groups):
         w.pages[0]["/Resources"]["/Font"]["/F1"].update(pdf_value({"/BaseFont": "/Courier"}))
-    assert result(compare_files([make_pdf(), make_pdf(mutate=mutate)]), "レイヤーなし").status == Status.FONT_ONLY
+    assert result(compare_files([make_pdf(), make_pdf(mutate=mutate)]), "レイヤーなし").status == Status.DIFFERENT
 
 
 def test_unused_page_font_for_default_appearance(make_pdf):
@@ -115,7 +115,7 @@ def test_unused_page_font_for_default_appearance(make_pdf):
         w.pages[0]["/Resources"]["/Font"]["/F1"].update(pdf_value({"/BaseFont": "/Courier"}))
     a = make_pdf(content="", annotations=[{"/Contents": "同じ文字", "/DA": "/F1 10 Tf"}])
     b = make_pdf(content="", annotations=[{"/Contents": "同じ文字", "/DA": "/F1 10 Tf"}], mutate=mutate)
-    assert result(compare_files([a, b]), "レイヤー: 担当者").status == Status.FONT_ONLY
+    assert result(compare_files([a, b]), "レイヤー: 担当者").status == Status.DIFFERENT
 
 
 def test_volatile_annotation_metadata_ignored(make_pdf):

@@ -1,5 +1,6 @@
 from conftest import statuses
 import csv
+import gc
 import io
 import os
 import shutil
@@ -21,7 +22,7 @@ def test_report_roundtrip_and_exports(make_pdf, tmp_path):
     report = compare_files([make_pdf(), make_pdf(text="Changed")])
     assert from_json(to_json(report)) == report
     assert "不一致" in to_text(report)
-    assert list(csv.reader(io.StringIO(to_csv(report))))[0][0] == "基準PDF"
+    assert list(csv.reader(io.StringIO(to_csv(report))))[0][0] == "役割"
     for suffix in (".txt", ".csv", ".json"):
         path = tmp_path / ("report" + suffix)
         save_report(report, path)
@@ -71,6 +72,7 @@ def test_cli_error_exit(runtime_app):
 
 @pytest.fixture
 def gui(runtime_app, monkeypatch):
+    gc.collect()  # Dispose of previous Tcl interpreters on Tk's owning thread.
     import tkinter as tk
     from pdf_layer_compare.gui import Application
     monkeypatch.setattr("pdf_layer_compare.gui.PROJECT", runtime_app)
@@ -83,6 +85,7 @@ def gui(runtime_app, monkeypatch):
     yield root, app
     if not app.closed:
         app.close()
+    gc.collect()
 
 
 def test_gui_subprocess_and_details(make_pdf, gui):
@@ -96,17 +99,16 @@ def test_gui_subprocess_and_details(make_pdf, gui):
         time.sleep(0.02)
     assert app.report is not None, app.detail.get("1.0", "end")
     assert Status.DIFFERENT in statuses(app.report)
-    assert len(app.tree.get_children()) == 4
-    app.tree.selection_set("1")
+    assert len(app.tree.get_children()) == 6
+    app.tree.selection_set("2")
     app.show_detail()
     assert "不一致" in app.detail.get("1.0", "end")
-    app.file_list.selection_set(1)
-    old = list(app.files)
-    app.move(-1)
-    assert app.files == list(reversed(old))
-    assert app.reference_label.cget("text") == f"基準PDF: {app.files[0]}"
-    assert "[基準PDF]" in app.file_list.get(0)
+    approval = app.files[0]
+    app.role_vars["承認"].set(approval)
+    assert app.reference_label.cget("text") == f"基準PDF (承認): {approval}"
     assert app.report is None
+    app.role_vars["承認"].set("")
+    assert app.reference_label.cget("text") == f"基準PDF (確認): {app.files[-1]}"
 
 
 def test_gui_cancel(make_pdf, gui):
@@ -120,28 +122,22 @@ def test_gui_cancel(make_pdf, gui):
     assert "中止" in app.status.get()
 
 
-def test_gui_preserves_all_group_statuses_and_saved_results(gui, tmp_path):
+def test_gui_preserves_all_group_statuses_and_saved_results(gui, tmp_path, make_pdf):
     _, app = gui
-    report = Report(["baseline.pdf", "target.pdf"], [
-        Result("baseline.pdf", "target.pdf", f"レイヤー: {status.name}", status, "詳細", [{"before": ["A"], "after": ["B"]}] if status == Status.FONT_ONLY else [])
-        for status in Status
-    ])
-    from pdf_layer_compare.model import AuthorInfo
-    for row in report.results:
-        row.reference_authors = AuthorInfo()
-        row.target_authors = AuthorInfo()
-        row.authors_changed = False
+    content = "q /OC /L0 BDC 1 1 2 2 re S EMC Q q /OC /L1 BDC 3 3 2 2 re S EMC Q q /OC /L2 BDC 4 4 2 2 re S EMC Q"
+    a = make_pdf(names=("担当", "確認", "審査", "承認"), content=content)
+    b = make_pdf(names=("担当", "確認", "審査", "承認"), content=content.replace("3 3", "9 9").replace("4 4 2 2 re S", "unknownoperator"))
+    report = compare_files([a, b])
     app.render_report(report)
-    observed = [app.tree.item(i, "values")[3] for i in app.tree.get_children()]
-    assert observed == [s.value for s in Status]
-    assert "総合" not in app.status.get()
-    app.tree.selection_set("1")
+    observed = {app.tree.item(i, "values")[1] for i in app.tree.get_children()}
+    assert set(Status).issubset(observed)
+    app.tree.selection_set(str(3 + report.layer_names.index("審査")))
     app.show_detail()
-    assert Status.FONT_ONLY in app.detail.get("1.0", "end")
+    assert "検証不能" in app.detail.get("1.0", "end")
     for extension in ("json", "csv", "txt"):
         path = tmp_path / ("groups." + extension)
         save_report(report, path)
-        assert Status.FONT_ONLY in path.read_text(encoding="utf-8-sig")
+        assert "検証不能" in path.read_text(encoding="utf-8-sig")
     assert from_json((tmp_path / "groups.json").read_text(encoding="utf-8")) == report
 
 
@@ -151,11 +147,11 @@ def test_gui_details_keep_author_changes_separate_from_content(gui, make_pdf, tm
     b = make_pdf(annotations=[{"/Contents": "same", "/T": "userB"}])
     report = compare_files([a, b])
     app.render_report(report)
-    index = next(i for i, r in enumerate(report.results) if r.component == "レイヤー: 担当者")
+    index = 3 + report.layer_names.index("担当者")
     app.tree.selection_set(str(index))
     app.show_detail()
     detail = app.detail.get("1.0", "end")
-    assert app.tree.item(str(index), "values")[3] == "一致"
+    assert app.tree.item(str(index), "values")[1] == "一致"
     assert "userA" in detail and "userB" in detail and "1件" in detail
     assert "注釈の作成者名（PDF記録値）" in detail and "構成に変更があります" in detail
     assert "合成順序" not in detail
@@ -179,6 +175,30 @@ def test_gui_timeout_never_success(make_pdf, gui, monkeypatch):
     assert app.process is None
     assert app.report is None
     assert "検証不能" in app.status.get()
+
+
+def test_gui_requires_both_mandatory_roles(make_pdf, gui, monkeypatch):
+    _, app = gui
+    errors = []
+    monkeypatch.setattr("pdf_layer_compare.gui.messagebox.showerror", lambda *a, **kw: errors.append(a))
+    app.role_vars["確認"].set(str(make_pdf()))
+    app.start()
+    assert errors and app.process is None and app.report is None
+
+
+def test_gui_pdf_save_uses_cmp_default(make_pdf, gui, tmp_path, monkeypatch):
+    pytest.importorskip("reportlab")
+    _, app = gui
+    app.render_report(compare_files([make_pdf(names=("担当", "確認"))] * 2))
+    app.output_format.set("PDF")
+    options = {}
+    def destination(**kwargs):
+        options.update(kwargs)
+        return str(tmp_path / "cmp.pdf")
+    monkeypatch.setattr("pdf_layer_compare.gui.filedialog.asksaveasfilename", destination)
+    app.save()
+    assert options["initialfile"] == "cmp.pdf" and options["defaultextension"] == ".pdf"
+    assert (tmp_path / "cmp.pdf").read_bytes().startswith(b"%PDF-")
 
 
 def test_offline_source_bundle(make_pdf, tmp_path):

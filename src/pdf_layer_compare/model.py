@@ -4,11 +4,44 @@ from enum import StrEnum
 
 class Status(StrEnum):
     MATCH = "一致"
-    FONT_ONLY = "一致（フォントのみ変更）"
     DIFFERENT = "不一致"
-    ADDED = "新規追加"
-    REMOVED = "削除"
     UNKNOWN = "検証不能"
+
+
+ROLES = ("担当", "確認", "審査", "承認")
+
+
+class BusinessStatus(StrEnum):
+    PASS = "PASS"
+    FAIL = "FAIL"
+    UNKNOWN = "UNVERIFIABLE"
+
+
+@dataclass
+class FileInfo:
+    path: str
+    role: str = ""
+    sha256: str = ""
+    modified_at: str = ""
+    size_bytes: int | None = None
+    error: str = ""
+
+    @property
+    def short_hash(self):
+        return f"{self.sha256[:6]}-{self.sha256[6:12]}" if self.sha256 else "取得不能"
+
+
+@dataclass
+class PairSummary:
+    left: str
+    right: str
+    overall: Status
+    business: BusinessStatus
+    required: list[str] = field(default_factory=list)
+    allowed: list[str] = field(default_factory=list)
+    reasons: list[str] = field(default_factory=list)
+    left_role: str = ""
+    right_role: str = ""
 
 
 class Unsupported(ValueError):
@@ -77,6 +110,7 @@ class Snapshot:
     groups: dict[str, Group] = field(default_factory=dict)
     file_error: str = ""
     authors: dict[str, AuthorInfo] = field(default_factory=dict)
+    file_info: FileInfo | None = None
 
 
 @dataclass
@@ -90,6 +124,8 @@ class Result:
     reference_authors: AuthorInfo | None = None
     target_authors: AuthorInfo | None = None
     authors_changed: bool | None = None
+    left_role: str = ""
+    right_role: str = ""
 
 
 @dataclass
@@ -97,3 +133,15 @@ class Report:
     files: list[str]
     results: list[Result] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    roles: list[str] = field(default_factory=list)
+    file_info: list[FileInfo] = field(default_factory=list)
+    pairs: list[PairSummary] = field(default_factory=list)
+    reference: str = ""
+    layer_names: list[str] = field(default_factory=list)
+    extra_names: list[str] = field(default_factory=list)
+
+    def __post_init__(self):
+        if not self.reference and self.files:
+            self.reference = self.files[-1]
+        if not self.roles:
+            self.roles = list(ROLES[:len(self.files)])
